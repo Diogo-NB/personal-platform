@@ -8,15 +8,17 @@ import (
 
 func newLiftCommand(runtime *commandRuntime) *cobra.Command {
 	return &cobra.Command{
-		Use:   "lift <file-path> [object-category]",
-		Short: "Store local file metadata by object category",
-		Long: `Validate a regular local file and store its metadata through the mocked S3
-repository. Categories are slash-delimited paths. The most specific configured
+		Use:   "lift <source-path> [object-category]",
+		Short: "Store local file or directory metadata by object category",
+		Long: `Validate a local file or directory and store its metadata through the mocked
+S3 repository. Directories are always traversed recursively; no recursive flag is
+required. Categories are slash-delimited paths. The most specific configured
 category mapping selects the storage tier; otherwise an ancestor mapping is used.
 
 When object-category is omitted, choose a configured category and optionally add
 a descendant suffix interactively. File contents are not uploaded.`,
 		Example: `  skycrate lift ./report.pdf documents
+  skycrate lift ./photos photos
   skycrate lift ./thesis.pdf backups/university
   skycrate lift ./photo.jpg`,
 		Args: cobra.RangeArgs(1, 2),
@@ -37,7 +39,7 @@ a descendant suffix interactively. File contents are not uploaded.`,
 				categoryPath = selected
 			}
 
-			storedObject, err := runtime.dependencies.Lifter.Lift(
+			storedObjects, err := runtime.dependencies.Lifter.Lift(
 				cmd.Context(),
 				args[0],
 				categoryPath,
@@ -46,13 +48,15 @@ a descendant suffix interactively. File contents are not uploaded.`,
 				return fmt.Errorf("lift: %w", err)
 			}
 
-			if _, err := fmt.Fprintf(
-				cmd.OutOrStdout(),
-				"Lifted metadata (mock): s3://%s/%s\n",
-				runtime.dependencies.Bucket,
-				storedObject.Path,
-			); err != nil {
-				return fmt.Errorf("write lift output: %w", err)
+			for _, storedObject := range storedObjects {
+				if _, err := fmt.Fprintf(
+					cmd.OutOrStdout(),
+					"Lifted metadata (mock): s3://%s/%s\n",
+					runtime.dependencies.Bucket,
+					storedObject.Path,
+				); err != nil {
+					return fmt.Errorf("write lift output: %w", err)
+				}
 			}
 
 			return nil

@@ -61,14 +61,66 @@ func TestLiftServiceLift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lift() error: %v", err)
 	}
-	if len(repository.saved) != 1 || got != repository.saved[0] {
+	if len(got) != 1 {
+		t.Fatalf("Lift() object count = %d, want 1", len(got))
+	}
+	if len(repository.saved) != 1 || got[0] != repository.saved[0] {
 		t.Fatalf("saved objects = %#v, result = %#v", repository.saved, got)
 	}
-	if got.Path != "backup/university/thesis/my-report.pdf" || got.Tier != "DEEP_ARCHIVE" {
-		t.Errorf("Lift() = %#v", got)
+	if got[0].Path != "backup/university/thesis/my-report.pdf" || got[0].Tier != "DEEP_ARCHIVE" {
+		t.Errorf("Lift() = %#v", got[0])
 	}
-	if got.Size != 5 || !got.CreatedAt.Equal(now.UTC()) || !got.UpdatedAt.Equal(now.UTC()) {
-		t.Errorf("Lift() metadata = %#v", got)
+	if got[0].Size != 5 || !got[0].CreatedAt.Equal(now.UTC()) || !got[0].UpdatedAt.Equal(now.UTC()) {
+		t.Errorf("Lift() metadata = %#v", got[0])
+	}
+}
+
+func TestLiftServiceLiftsDirectoryRecursively(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	writeLiftFixture(t, filepath.Join(directory, "Root File.TXT"), "root")
+	writeLiftFixture(t, filepath.Join(directory, "Research Notes", "Draft One.MD"), "draft")
+	writeLiftFixture(t, filepath.Join(directory, "Research Notes", "Final.PDF"), "final report")
+	if err := os.Mkdir(filepath.Join(directory, "empty"), 0o700); err != nil {
+		t.Fatalf("create empty directory: %v", err)
+	}
+
+	repository := &stubRepository{}
+	now := time.Date(2026, time.April, 1, 10, 0, 0, 0, time.UTC)
+	service, err := NewLiftService(repository, newTestCatalog(t), func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+
+	objects, err := service.Lift(t.Context(), directory, "backup")
+	if err != nil {
+		t.Fatalf("Lift() error: %v", err)
+	}
+	wantPaths := []string{
+		"backup/research-notes/draft-one.md",
+		"backup/research-notes/final.pdf",
+		"backup/root-file.txt",
+	}
+	if len(objects) != len(wantPaths) || len(repository.saved) != len(wantPaths) {
+		t.Fatalf("object counts = (%d, %d), want %d", len(objects), len(repository.saved), len(wantPaths))
+	}
+	for index, wantPath := range wantPaths {
+		if objects[index].Path != wantPath || repository.saved[index] != objects[index] {
+			t.Errorf("object %d = %#v, want path %q", index, objects[index], wantPath)
+		}
+		if objects[index].Category != "backup" || objects[index].Tier != "GLACIER" {
+			t.Errorf("object %d routing = %#v", index, objects[index])
+		}
+		if !objects[index].CreatedAt.Equal(now) || !objects[index].UpdatedAt.Equal(now) {
+			t.Errorf(
+				"object %d timestamps = (%v, %v), want %v",
+				index,
+				objects[index].CreatedAt,
+				objects[index].UpdatedAt,
+				now,
+			)
+		}
 	}
 }
 
@@ -80,8 +132,21 @@ func TestLiftServiceRejectsInvalidInputs(t *testing.T) {
 		prepare func(*testing.T) string
 		ctx     func(*testing.T) context.Context
 	}{
-		{name: "missing file", prepare: func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") }, ctx: func(t *testing.T) context.Context { return t.Context() }},
-		{name: "directory", prepare: func(t *testing.T) string { return t.TempDir() }, ctx: func(t *testing.T) context.Context { return t.Context() }},
+		{
+			name:    "empty path",
+			prepare: func(*testing.T) string { return "" },
+			ctx:     func(t *testing.T) context.Context { return t.Context() },
+		},
+		{
+			name:    "missing file",
+			prepare: func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") },
+			ctx:     func(t *testing.T) context.Context { return t.Context() },
+		},
+		{
+			name:    "empty directory",
+			prepare: func(t *testing.T) string { return t.TempDir() },
+			ctx:     func(t *testing.T) context.Context { return t.Context() },
+		},
 		{
 			name: "symbolic link",
 			prepare: func(t *testing.T) string {
@@ -94,7 +159,7 @@ func TestLiftServiceRejectsInvalidInputs(t *testing.T) {
 				if err := os.Symlink(target, link); err != nil {
 					t.Fatalf("create symlink: %v", err)
 				}
-				return link
+				return link + string(os.PathSeparator)
 			},
 			ctx: func(t *testing.T) context.Context { return t.Context() },
 		},
@@ -133,6 +198,51 @@ func TestLiftServiceRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestLiftServiceRejectsSymbolicLinkInDirectory(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	target := filepath.Join(directory, "target.txt")
+	writeLiftFixture(t, target, "data")
+	if err := os.Symlink(target, filepath.Join(directory, "link.txt")); err != nil {
+		t.Fatalf("create symbolic link: %v", err)
+	}
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+	_, err = service.Lift(t.Context(), directory, "backup")
+	if err == nil || !strings.Contains(err.Error(), "symbolic links are not supported") {
+		t.Fatalf("Lift() error = %v, want symbolic link error", err)
+	}
+	if len(repository.saved) != 0 {
+		t.Errorf("Save() calls = %d, want 0", len(repository.saved))
+	}
+}
+
+func TestLiftServiceRejectsNormalizedPathConflicts(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	writeLiftFixture(t, filepath.Join(directory, "My File.txt"), "one")
+	writeLiftFixture(t, filepath.Join(directory, "my-file.txt"), "two")
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+	_, err = service.Lift(t.Context(), directory, "backup")
+	if err == nil || !strings.Contains(err.Error(), "normalized path conflicts") {
+		t.Fatalf("Lift() error = %v, want conflict error", err)
+	}
+	if len(repository.saved) != 0 {
+		t.Errorf("Save() calls = %d, want 0", len(repository.saved))
+	}
+}
+
 func TestLiftServicePropagatesRepositoryError(t *testing.T) {
 	t.Parallel()
 
@@ -146,7 +256,17 @@ func TestLiftServicePropagatesRepositoryError(t *testing.T) {
 		t.Fatalf("NewLiftService() error: %v", err)
 	}
 	_, err = service.Lift(t.Context(), filePath, "backup")
-	if err == nil || !strings.Contains(err.Error(), "save object: save failed") {
+	if err == nil || !strings.Contains(err.Error(), "save object \"backup/file.txt\": save failed") {
 		t.Fatalf("Lift() error = %v, want wrapped repository error", err)
+	}
+}
+
+func writeLiftFixture(t *testing.T, path string, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create fixture directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
 	}
 }

@@ -48,11 +48,11 @@ func newTestObject(t *testing.T, name string, size int64) object.Object {
 	t.Helper()
 
 	storedObject, err := object.New(object.NewParams{
-		Name:      name,
-		Category:  "backup",
-		Size:      size,
-		Tier:      "GLACIER",
-		Timestamp: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		RelativePath: name,
+		Category:     "backup",
+		Size:         size,
+		Tier:         "GLACIER",
+		Timestamp:    time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("object.New() error: %v", err)

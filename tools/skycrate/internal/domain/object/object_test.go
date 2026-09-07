@@ -10,17 +10,17 @@ func TestNew(t *testing.T) {
 
 	timestamp := time.Date(2026, time.April, 5, 12, 30, 0, 0, time.FixedZone("test", -3*60*60))
 	got, err := New(NewParams{
-		Name:      " My Report.PDF ",
-		Category:  " Back Ups / University ",
-		Size:      42,
-		Tier:      "GLACIER",
-		Timestamp: timestamp,
+		RelativePath: " Research Notes / My Report.PDF ",
+		Category:     " Back Ups / University ",
+		Size:         42,
+		Tier:         "GLACIER",
+		Timestamp:    timestamp,
 	})
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
 
-	if got.Path != "back-ups/university/my-report.pdf" {
+	if got.Path != "back-ups/university/research-notes/my-report.pdf" {
 		t.Errorf("Path = %q, want normalized path", got.Path)
 	}
 	if got.Name != "my-report.pdf" || got.Category != "back-ups/university" {

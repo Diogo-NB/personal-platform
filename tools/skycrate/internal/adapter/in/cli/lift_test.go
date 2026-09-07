@@ -20,7 +20,9 @@ func TestLiftCommandHelp(t *testing.T) {
 		t.Fatalf("execute lift help: %v", err)
 	}
 	for _, expected := range []string{
-		"skycrate lift <file-path> [object-category]",
+		"skycrate lift <source-path> [object-category]",
+		"Directories are always traversed recursively",
+		"no recursive flag is",
 		"most specific configured",
 		"ancestor mapping",
 		"descendant suffix interactively",
@@ -29,6 +31,39 @@ func TestLiftCommandHelp(t *testing.T) {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("help does not contain %q:\n%s", expected, output)
 		}
+	}
+}
+
+func TestLiftDirectoryRecursively(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "Root File.TXT"), []byte("root"), 0o600); err != nil {
+		t.Fatalf("write root fixture: %v", err)
+	}
+	nestedDirectory := filepath.Join(directory, "Research Notes")
+	if err := os.Mkdir(nestedDirectory, 0o700); err != nil {
+		t.Fatalf("create nested directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDirectory, "Draft.MD"), []byte("draft"), 0o600); err != nil {
+		t.Fatalf("write nested fixture: %v", err)
+	}
+
+	stdout, stderr, err := executeCommand(
+		t,
+		writeCommandConfig(t),
+		nil,
+		"lift",
+		directory,
+		"documents",
+	)
+	if err != nil {
+		t.Fatalf("execute lift: %v", err)
+	}
+	const want = "Lifted metadata (mock): s3://test-bucket/documents/research-notes/draft.md\n" +
+		"Lifted metadata (mock): s3://test-bucket/documents/root-file.txt\n"
+	if stdout != want || stderr != "" {
+		t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, want)
 	}
 }
 

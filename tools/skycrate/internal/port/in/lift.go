@@ -7,5 +7,5 @@ import (
 )
 
 type Lifter interface {
-	Lift(ctx context.Context, filePath, category string) (object.Object, error)
+	Lift(ctx context.Context, sourcePath, category string) ([]object.Object, error)
 }

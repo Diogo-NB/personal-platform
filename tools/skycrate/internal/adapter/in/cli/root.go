@@ -29,12 +29,13 @@ func New(load Loader) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "skycrate",
 		Short: "Manage files in cloud storage",
-		Long: `Skycrate routes local file metadata through hierarchical object categories.
+		Long: `Skycrate routes local file and directory metadata through hierarchical object categories.
 It uses one configured bucket, resolves each category to a storage tier, and
 summarizes objects returned by the configured storage repository.
 
-The current S3 repository is mocked. Lift validates and models a local file but
-stores only its metadata; list returns deterministic mocked objects.`,
+The current S3 repository is mocked. Lift validates and models local files,
+recursively traversing directories, but stores only metadata; list returns
+deterministic mocked objects.`,
 		Example: `  skycrate --config ./skycrate.yaml lift ./report.pdf documents
   skycrate --config ./skycrate.yaml list --category backups`,
 		SilenceErrors: true,

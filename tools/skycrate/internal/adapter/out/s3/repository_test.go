@@ -156,11 +156,11 @@ func newTestRepository(t *testing.T) *Repository {
 func validObject(t *testing.T) object.Object {
 	t.Helper()
 	storedObject, err := object.New(object.NewParams{
-		Name:      "report.pdf",
-		Category:  "documents",
-		Size:      1,
-		Tier:      "STANDARD",
-		Timestamp: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		RelativePath: "report.pdf",
+		Category:     "documents",
+		Size:         1,
+		Tier:         "STANDARD",
+		Timestamp:    time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
 		t.Fatalf("object.New() error: %v", err)

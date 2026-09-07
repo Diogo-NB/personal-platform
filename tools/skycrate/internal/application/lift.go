@@ -46,51 +46,71 @@ func NewLiftService(
 
 func (s *LiftService) Lift(
 	ctx context.Context,
-	filePath string,
+	sourcePath string,
 	categoryPath string,
-) (object.Object, error) {
+) ([]object.Object, error) {
 	if err := ctx.Err(); err != nil {
-		return object.Object{}, fmt.Errorf("lift object: %w", err)
+		return nil, fmt.Errorf("lift objects: %w", err)
 	}
+	if sourcePath == "" {
+		return nil, errors.New("inspect source: path must not be empty")
+	}
+	sourcePath = filepath.Clean(sourcePath)
 
-	info, err := os.Lstat(filePath)
+	info, err := os.Lstat(sourcePath)
 	if err != nil {
-		return object.Object{}, fmt.Errorf("inspect file %q: %w", filePath, err)
+		return nil, fmt.Errorf("inspect source %q: %w", sourcePath, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return object.Object{}, fmt.Errorf("inspect file %q: symbolic links are not supported", filePath)
+		return nil, fmt.Errorf("inspect source %q: symbolic links are not supported", sourcePath)
 	}
-	if !info.Mode().IsRegular() {
-		return object.Object{}, fmt.Errorf("inspect file %q: not a regular file", filePath)
-	}
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return object.Object{}, fmt.Errorf("open file %q: %w", filePath, err)
-	}
-	if err := file.Close(); err != nil {
-		return object.Object{}, fmt.Errorf("close file %q: %w", filePath, err)
+	if !info.Mode().IsRegular() && !info.IsDir() {
+		return nil, fmt.Errorf("inspect source %q: not a regular file or directory", sourcePath)
 	}
 
 	resolution, err := s.catalog.Resolve(categoryPath)
 	if err != nil {
-		return object.Object{}, err
+		return nil, err
 	}
 
-	storedObject, err := object.New(object.NewParams{
-		Name:      filepath.Base(filePath),
-		Category:  resolution.Category,
-		Size:      info.Size(),
-		Tier:      resolution.Tier,
-		Timestamp: s.now(),
-	})
+	files, err := collectFiles(ctx, sourcePath, info)
 	if err != nil {
-		return object.Object{}, fmt.Errorf("create object: %w", err)
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("inspect directory %q: no regular files found", sourcePath)
 	}
 
-	if err := s.repository.Save(ctx, storedObject); err != nil {
-		return object.Object{}, fmt.Errorf("save object: %w", err)
+	timestamp := s.now()
+	objects := make([]object.Object, 0, len(files))
+	paths := make(map[string]string, len(files))
+	for _, file := range files {
+		storedObject, err := object.New(object.NewParams{
+			RelativePath: file.relativePath,
+			Category:     resolution.Category,
+			Size:         file.size,
+			Tier:         resolution.Tier,
+			Timestamp:    timestamp,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create object for %q: %w", file.path, err)
+		}
+		if otherSource, exists := paths[storedObject.Path]; exists {
+			return nil, fmt.Errorf(
+				"create object for %q: normalized path conflicts with %q",
+				file.path,
+				otherSource,
+			)
+		}
+		paths[storedObject.Path] = file.path
+		objects = append(objects, storedObject)
 	}
 
-	return storedObject, nil
+	for _, storedObject := range objects {
+		if err := s.repository.Save(ctx, storedObject); err != nil {
+			return nil, fmt.Errorf("save object %q: %w", storedObject.Path, err)
+		}
+	}
+
+	return objects, nil
 }

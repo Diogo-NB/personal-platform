@@ -2,10 +2,10 @@ package object
 
 import (
 	"fmt"
+	"path"
 	"time"
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/category"
-	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/util"
 )
 
 type Object struct {
@@ -19,11 +19,11 @@ type Object struct {
 }
 
 type NewParams struct {
-	Name      string
-	Category  string
-	Size      int64
-	Tier      string
-	Timestamp time.Time
+	RelativePath string
+	Category     string
+	Size         int64
+	Tier         string
+	Timestamp    time.Time
 }
 
 type RehydrateParams struct {
@@ -37,9 +37,9 @@ type RehydrateParams struct {
 }
 
 func New(params NewParams) (Object, error) {
-	name, err := util.Slug(params.Name)
+	relativePath, err := normalizeRelativePath(params.RelativePath)
 	if err != nil {
-		return Object{}, fmt.Errorf("normalize object name: %w", err)
+		return Object{}, fmt.Errorf("normalize object relative path: %w", err)
 	}
 
 	categoryPath, err := category.NormalizePath(params.Category)
@@ -49,8 +49,8 @@ func New(params NewParams) (Object, error) {
 
 	timestamp := params.Timestamp.UTC()
 	storedObject := Object{
-		Path:      categoryPath + "/" + name,
-		Name:      name,
+		Path:      categoryPath + "/" + relativePath,
+		Name:      path.Base(relativePath),
 		Category:  categoryPath,
 		Size:      params.Size,
 		Tier:      params.Tier,

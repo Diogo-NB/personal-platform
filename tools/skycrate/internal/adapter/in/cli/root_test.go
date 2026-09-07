@@ -32,7 +32,7 @@ func TestRootCommandHelp(t *testing.T) {
 	for _, expected := range []string{
 		"hierarchical object categories",
 		"current S3 repository is mocked",
-		"lift        Store local file metadata by object category",
+		"lift        Store local file or directory metadata by object category",
 		"list        Summarize stored object count and size",
 		"--config string",
 	} {
