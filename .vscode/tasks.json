@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Skycrate",
+      "type": "process",
+      "command": "go",
+      "args": [
+        "build",
+        "-o",
+        "${workspaceFolder}/bin/skycrate",
+        "."
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/tools/skycrate"
+      },
+      "problemMatcher": [
+        "$go"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
