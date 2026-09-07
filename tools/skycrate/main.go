@@ -3,13 +3,49 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
-	"github.com/Diogo-NB/personal-platform/tools/skycrate/cmd"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/adapter/in/cli"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/adapter/out/config"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/adapter/out/s3"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/application"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/category"
 )
 
 func main() {
-	if err := cmd.Execute(); err != nil {
+	if err := cli.New(loadDependencies).Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func loadDependencies(configPath string) (cli.Dependencies, error) {
+	loaded, err := config.Load(configPath)
+	if err != nil {
+		return cli.Dependencies{}, err
+	}
+
+	catalog, err := category.NewCatalog(loaded.Categories)
+	if err != nil {
+		return cli.Dependencies{}, fmt.Errorf("create category catalog: %w", err)
+	}
+	repository, err := s3.New(loaded.Bucket, os.Stderr)
+	if err != nil {
+		return cli.Dependencies{}, fmt.Errorf("create s3 repository: %w", err)
+	}
+	lifter, err := application.NewLiftService(repository, catalog, time.Now)
+	if err != nil {
+		return cli.Dependencies{}, fmt.Errorf("create lift service: %w", err)
+	}
+	lister, err := application.NewListService(repository, catalog)
+	if err != nil {
+		return cli.Dependencies{}, fmt.Errorf("create list service: %w", err)
+	}
+
+	return cli.Dependencies{
+		Bucket:  loaded.Bucket,
+		Catalog: catalog,
+		Lifter:  lifter,
+		Lister:  lister,
+	}, nil
 }
