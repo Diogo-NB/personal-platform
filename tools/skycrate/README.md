@@ -217,6 +217,10 @@ Domain packages do not import application, ports, adapters, Cobra, or Viper.
 
 ## Development
 
+AI coding agents must read and follow [`AGENTS.md`](./AGENTS.md) before changing
+Skycrate. Repository-level instruction routers make this guide available to
+Codex and Claude Code.
+
 ```sh
 gofmt -w main.go internal
 gopls check main.go internal/**/*.go
