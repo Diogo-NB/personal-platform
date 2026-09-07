@@ -98,5 +98,6 @@ jobs:
             "$GITHUB_WORKSPACE/dist/skycrate_${VERSION}_darwin_arm64.tar.gz" \
             "$GITHUB_WORKSPACE/dist/SHA256SUMS" \
             --generate-notes \
+            --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "$TAG"
