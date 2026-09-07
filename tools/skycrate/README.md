@@ -10,6 +10,29 @@ recursively traverses a directory, creates storage metadata for every file, and
 acknowledges each save without uploading file contents. `list` summarizes
 deterministic mocked objects.
 
+## Install
+
+Install the latest release on Linux amd64 or macOS arm64:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Diogo-NB/personal-platform/main/tools/skycrate/install.sh | sh
+```
+
+To install a specific stable version, pass it after `sh -s --`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Diogo-NB/personal-platform/main/tools/skycrate/install.sh | sh -s -- 0.1.0
+```
+
+The installer requires `curl`, `tar`, `awk`, and either `sha256sum` or
+`shasum`. It verifies the selected release archive, installs the executable at
+`~/.local/bin/skycrate`, and warns if that directory is not in `PATH`.
+
+On Linux, the installer creates the initial configuration at
+`${XDG_CONFIG_HOME:-$HOME/.config}/skycrate/config.yaml`. On macOS, it uses
+`~/Library/Application Support/skycrate/config.yaml`, matching Skycrate's
+platform-native default. An existing configuration is never overwritten.
+
 ## Build
 
 ```sh
@@ -259,6 +282,7 @@ go test ./...
 go test -race ./...
 go vet ./...
 go build .
+sh -n install.sh
 ```
 
 ## License

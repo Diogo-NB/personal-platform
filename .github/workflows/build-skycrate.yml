@@ -46,6 +46,10 @@ jobs:
         working-directory: tools/skycrate
         run: go vet ./...
 
+      - name: Test installer
+        working-directory: tools/skycrate
+        run: sh -n install.sh
+
       - name: Build and package
         working-directory: tools/skycrate
         shell: bash
