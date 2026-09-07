@@ -1,0 +1,96 @@
+name: Build Skycrate
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Stable repository version used in archive names
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Check and build
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Validate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::version must use stable MAJOR.MINOR.PATCH format"
+            exit 1
+          fi
+
+      - name: Check out build commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/skycrate/go.mod
+          cache-dependency-path: tools/skycrate/go.sum
+
+      - name: Test
+        working-directory: tools/skycrate
+        run: go test -race ./...
+
+      - name: Vet
+        working-directory: tools/skycrate
+        run: go vet ./...
+
+      - name: Build and package
+        working-directory: tools/skycrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          dist_dir="$GITHUB_WORKSPACE/dist"
+          linux_dir="$dist_dir/skycrate_linux_amd64"
+          darwin_dir="$dist_dir/skycrate_darwin_arm64"
+          mkdir -p "$linux_dir" "$darwin_dir"
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w" -o "$linux_dir/skycrate" .
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -ldflags="-s -w" -o "$darwin_dir/skycrate" .
+
+          cp README.md LICENSE "$linux_dir/"
+          cp README.md LICENSE "$darwin_dir/"
+
+          tar -C "$linux_dir" -czf "$dist_dir/skycrate_${VERSION}_linux_amd64.tar.gz" \
+            skycrate README.md LICENSE
+          tar -C "$darwin_dir" -czf "$dist_dir/skycrate_${VERSION}_darwin_arm64.tar.gz" \
+            skycrate README.md LICENSE
+
+          cd "$dist_dir"
+          sha256sum \
+            "skycrate_${VERSION}_darwin_arm64.tar.gz" \
+            "skycrate_${VERSION}_linux_amd64.tar.gz" > SHA256SUMS
+
+      - name: Verify packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/dist"
+          sha256sum --check SHA256SUMS
+          tar -tzf "skycrate_${VERSION}_linux_amd64.tar.gz"
+          tar -tzf "skycrate_${VERSION}_darwin_arm64.tar.gz"
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: skycrate-release-assets-${{ inputs.version }}
+          path: |
+            dist/skycrate_${{ inputs.version }}_linux_amd64.tar.gz
+            dist/skycrate_${{ inputs.version }}_darwin_arm64.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0

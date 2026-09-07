@@ -1,0 +1,102 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable repository version (for example, 0.1.0)
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  check-release:
+    name: Check release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      TAG: v${{ inputs.version }}
+    steps:
+      - name: Validate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::version must use stable MAJOR.MINOR.PATCH format"
+            exit 1
+          fi
+
+      - name: Check out release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Ensure tag and release do not exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::tag $TAG already exists"
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists"
+            exit 1
+          fi
+
+  build-skycrate:
+    name: Build Skycrate
+    needs: check-release
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-skycrate.yml
+    with:
+      version: ${{ inputs.version }}
+
+  publish:
+    name: Publish release
+    needs:
+      - check-release
+      - build-skycrate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      TAG: v${{ inputs.version }}
+    steps:
+      - name: Download Skycrate release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: skycrate-release-assets-${{ inputs.version }}
+          path: dist
+
+      - name: Verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/dist"
+          sha256sum --check SHA256SUMS
+          tar -tzf "skycrate_${VERSION}_linux_amd64.tar.gz"
+          tar -tzf "skycrate_${VERSION}_darwin_arm64.tar.gz"
+
+      - name: Publish GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            "$GITHUB_WORKSPACE/dist/skycrate_${VERSION}_linux_amd64.tar.gz" \
+            "$GITHUB_WORKSPACE/dist/skycrate_${VERSION}_darwin_arm64.tar.gz" \
+            "$GITHUB_WORKSPACE/dist/SHA256SUMS" \
+            --generate-notes \
+            --target "$GITHUB_SHA" \
+            --title "$TAG"

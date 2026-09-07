@@ -215,6 +215,37 @@ Domain packages do not import application, ports, adapters, Cobra, or Viper.
 - Return provider upload metadata and elapsed milliseconds.
 - Add machine-readable output where it benefits automation.
 
+## Releases
+
+Repository releases provide Skycrate for these platforms:
+
+| Platform | Architecture | Asset |
+| --- | --- | --- |
+| Linux | amd64 | `skycrate_<version>_linux_amd64.tar.gz` |
+| macOS | arm64 | `skycrate_<version>_darwin_arm64.tar.gz` |
+
+Each archive contains the `skycrate` binary, this README, and the MIT license.
+Download both archives and `SHA256SUMS` into the same directory, then verify
+them on Linux with:
+
+```sh
+sha256sum --check SHA256SUMS
+```
+
+On macOS, use:
+
+```sh
+shasum -a 256 --check SHA256SUMS
+```
+
+Maintainers publish a release from the repository's **Actions** tab: select
+**Publish release**, choose **Run workflow**, and enter a stable version such as
+`0.1.0`. The workflow creates the corresponding `v0.1.0` tag and GitHub release
+from the selected commit.
+
+Releases use one repository-wide version. Future tools will be packaged by the
+same root workflow and included in the same repository release.
+
 ## Development
 
 AI coding agents must read and follow [`AGENTS.md`](./AGENTS.md) before changing
