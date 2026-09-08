@@ -201,6 +201,18 @@ func TestLiftServiceRequestsApprovalBeforeSaving(t *testing.T) {
 	if gotSummary.ObjectCount != 2 || gotSummary.TotalBytes != 10 {
 		t.Errorf("approval summary = %#v, want 2 objects and 10 bytes", gotSummary)
 	}
+	wantSummaries := []in.LiftObjectSummary{
+		{Path: "backup/first.txt", SizeBytes: 4},
+		{Path: "backup/second.txt", SizeBytes: 6},
+	}
+	if len(gotSummary.Objects) != len(wantSummaries) {
+		t.Fatalf("approval object summaries = %#v, want %#v", gotSummary.Objects, wantSummaries)
+	}
+	for index, want := range wantSummaries {
+		if gotSummary.Objects[index] != want {
+			t.Errorf("approval object summary %d = %#v, want %#v", index, gotSummary.Objects[index], want)
+		}
+	}
 	if gotSummary.Tier != storage.TierCold {
 		t.Errorf("approval tier = %q, want %q", gotSummary.Tier, storage.TierCold)
 	}

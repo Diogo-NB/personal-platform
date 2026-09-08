@@ -126,8 +126,17 @@ func (s *LiftService) Lift(
 		totalBytes += file.size
 	}
 
+	objectSummaries := make([]in.LiftObjectSummary, len(objects))
+	for index, storedObject := range objects {
+		objectSummaries[index] = in.LiftObjectSummary{
+			Path:      storedObject.Path,
+			SizeBytes: storedObject.Size,
+		}
+	}
+
 	approved, err := request.Approve(ctx, in.LiftSummary{
 		ObjectCount: len(objects),
+		Objects:     objectSummaries,
 		TotalBytes:  totalBytes,
 		Tier:        resolution.Tier,
 	})

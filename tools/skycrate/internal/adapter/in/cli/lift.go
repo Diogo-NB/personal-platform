@@ -21,8 +21,9 @@ semantic storage tier; otherwise an ancestor mapping is used. Categories without
 a configured ancestor use the default tier backed by S3 Standard.
 
 When object-category is omitted, choose a configured category and optionally add
-a descendant suffix interactively. Before uploading, review the object count,
-combined size, and storage tier. Use --yes to skip this confirmation.`,
+a descendant suffix interactively. Before uploading, review each computed object
+path and its size, the object count, combined size, and storage tier. Use --yes
+to skip this confirmation.`,
 		Example: `  skycrate lift ./report.pdf documents
   skycrate lift ./recordings recordings
   skycrate lift ./thesis.pdf backup/university

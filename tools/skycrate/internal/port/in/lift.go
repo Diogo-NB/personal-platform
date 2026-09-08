@@ -15,8 +15,14 @@ type LiftRequest struct {
 	Approve    LiftApproval
 }
 
+type LiftObjectSummary struct {
+	Path      string
+	SizeBytes int64
+}
+
 type LiftSummary struct {
 	ObjectCount int
+	Objects     []LiftObjectSummary
 	TotalBytes  int64
 	Tier        storage.Tier
 }

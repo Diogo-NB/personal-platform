@@ -43,8 +43,12 @@ func TestConfirmLift(t *testing.T) {
 				output,
 				in.LiftSummary{
 					ObjectCount: 2,
-					TotalBytes:  1_500_000_000,
-					Tier:        storage.TierCold,
+					Objects: []in.LiftObjectSummary{
+						{Path: "test/unimed/carteira_unimed.pdf", SizeBytes: 90_000},
+						{Path: "test/unimed/perfil_contratual.pdf", SizeBytes: 897_810},
+					},
+					TotalBytes: 987_810,
+					Tier:       storage.TierCold,
 				},
 			)
 			if err != nil {
@@ -57,7 +61,9 @@ func TestConfirmLift(t *testing.T) {
 			text := output.String()
 			for _, expected := range []string{
 				"Objects: 2\n",
-				"Total size: 1500000000 bytes (1.500 GB)\n",
+				"- test/unimed/carteira_unimed.pdf | 0.09 MB | 0.000 GB\n",
+				"- test/unimed/perfil_contratual.pdf | 0.90 MB | 0.001 GB\n",
+				"Total size: 0.99 MB | 0.001 GB\n",
 				"Storage tier: cold\n",
 				"Continue with upload? [y/N]: ",
 			} {

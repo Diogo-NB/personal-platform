@@ -154,12 +154,17 @@ configured. A category with no configured ancestor uses the `default` tier and
 is stored in S3 Standard.
 
 After validating the complete source and creating its objects, `lift` reports
-the object count, exact byte total, decimal-gigabyte total, and resolved storage
-tier on stderr. It then asks for confirmation:
+each full computed object path with its size in decimal megabytes (two decimal
+places) and decimal gigabytes (three decimal places). It also reports the object
+count, combined size in both units, and resolved storage tier on stderr before
+asking for confirmation:
 
 ```text
 Objects: 3
-Total size: 1500000000 bytes (1.500 GB)
+- documents/drafts/outline.md | 50.00 MB | 0.050 GB
+- documents/final-report.pdf | 450.00 MB | 0.450 GB
+- documents/source-data.zip | 1000.00 MB | 1.000 GB
+Total size: 1500.00 MB | 1.500 GB
 Storage tier: cold
 Continue with upload? [y/N]:
 ```

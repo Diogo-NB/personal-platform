@@ -146,7 +146,8 @@ func TestLiftRequestsConfirmation(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"Objects: 1\n",
-		"Total size: 5 bytes (0.000 GB)\n",
+		"- documents/my-report.pdf | 0.00 MB | 0.000 GB\n",
+		"Total size: 0.00 MB | 0.000 GB\n",
 		"Storage tier: instant\n",
 		"Continue with upload? [y/N]: ",
 	} {

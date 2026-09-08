@@ -10,17 +10,32 @@ import (
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/in"
 )
 
+const bytesPerMegabyte = 1_000_000
+
 func confirmLift(
 	ctx context.Context,
 	input io.Reader,
 	output io.Writer,
 	summary in.LiftSummary,
 ) (bool, error) {
+	if _, err := fmt.Fprintf(output, "Objects: %d\n", summary.ObjectCount); err != nil {
+		return false, fmt.Errorf("write upload summary: %w", err)
+	}
+	for _, object := range summary.Objects {
+		if _, err := fmt.Fprintf(
+			output,
+			"- %s | %.2f MB | %.3f GB\n",
+			object.Path,
+			float64(object.SizeBytes)/bytesPerMegabyte,
+			float64(object.SizeBytes)/bytesPerGigabyte,
+		); err != nil {
+			return false, fmt.Errorf("write upload summary: %w", err)
+		}
+	}
 	if _, err := fmt.Fprintf(
 		output,
-		"Objects: %d\nTotal size: %d bytes (%.3f GB)\nStorage tier: %s\n",
-		summary.ObjectCount,
-		summary.TotalBytes,
+		"Total size: %.2f MB | %.3f GB\nStorage tier: %s\n",
+		float64(summary.TotalBytes)/bytesPerMegabyte,
 		float64(summary.TotalBytes)/bytesPerGigabyte,
 		summary.Tier,
 	); err != nil {
