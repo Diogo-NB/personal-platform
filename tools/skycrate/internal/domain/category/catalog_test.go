@@ -1,14 +1,18 @@
 package category
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
+)
 
 func TestNewCatalog(t *testing.T) {
 	t.Parallel()
 
-	catalog, err := NewCatalog(map[string]string{
-		"Photos":                "STANDARD_IA",
-		"Back Ups":              "GLACIER",
-		"Back Ups / University": "DEEP_ARCHIVE",
+	catalog, err := NewCatalog(map[string]storage.Tier{
+		"Photos":                storage.TierInstant,
+		"Back Ups":              storage.TierCold,
+		"Back Ups / University": storage.TierArchive,
 	})
 	if err != nil {
 		t.Fatalf("NewCatalog() error: %v", err)
@@ -33,17 +37,17 @@ func TestNewCatalogRejectsInvalidMappings(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		categories map[string]string
+		categories map[string]storage.Tier
 	}{
-		{name: "empty catalog", categories: map[string]string{}},
-		{name: "invalid category", categories: map[string]string{"backups//school": "GLACIER"}},
-		{name: "empty tier", categories: map[string]string{"backups": " "}},
-		{name: "tier whitespace", categories: map[string]string{"backups": " GLACIER "}},
+		{name: "empty catalog", categories: map[string]storage.Tier{}},
+		{name: "invalid category", categories: map[string]storage.Tier{"backups//school": storage.TierCold}},
+		{name: "empty tier", categories: map[string]storage.Tier{"backups": storage.TierUnknown}},
+		{name: "unsupported tier", categories: map[string]storage.Tier{"backups": storage.Tier("warm")}},
 		{
 			name: "normalized duplicate",
-			categories: map[string]string{
-				"Back Ups": "GLACIER",
-				"back-ups": "STANDARD",
+			categories: map[string]storage.Tier{
+				"Back Ups": storage.TierCold,
+				"back-ups": storage.TierInstant,
 			},
 		},
 	}
@@ -61,9 +65,9 @@ func TestNewCatalogRejectsInvalidMappings(t *testing.T) {
 func TestCatalogResolve(t *testing.T) {
 	t.Parallel()
 
-	catalog, err := NewCatalog(map[string]string{
-		"backup":            "GLACIER",
-		"backup/university": "DEEP_ARCHIVE",
+	catalog, err := NewCatalog(map[string]storage.Tier{
+		"backup":            storage.TierCold,
+		"backup/university": storage.TierArchive,
 	})
 	if err != nil {
 		t.Fatalf("NewCatalog() error: %v", err)
@@ -73,12 +77,12 @@ func TestCatalogResolve(t *testing.T) {
 		name         string
 		category     string
 		wantCategory string
-		wantTier     string
+		wantTier     storage.Tier
 		wantErr      bool
 	}{
-		{name: "exact", category: "backup", wantCategory: "backup", wantTier: "GLACIER"},
-		{name: "ancestor", category: "BACKUP/Personal/Photos", wantCategory: "backup/personal/photos", wantTier: "GLACIER"},
-		{name: "specific", category: "backup/university/thesis", wantCategory: "backup/university/thesis", wantTier: "DEEP_ARCHIVE"},
+		{name: "exact", category: "backup", wantCategory: "backup", wantTier: storage.TierCold},
+		{name: "ancestor", category: "BACKUP/Personal/Photos", wantCategory: "backup/personal/photos", wantTier: storage.TierCold},
+		{name: "specific", category: "backup/university/thesis", wantCategory: "backup/university/thesis", wantTier: storage.TierArchive},
 		{name: "segment boundary", category: "backup-old", wantErr: true},
 		{name: "unconfigured root", category: "documents", wantErr: true},
 	}

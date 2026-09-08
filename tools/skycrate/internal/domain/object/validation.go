@@ -14,11 +14,13 @@ func (o Object) Validate() error {
 		"path":     o.Path,
 		"name":     o.Name,
 		"category": o.Category,
-		"tier":     o.Tier,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("object %s must not be empty", field)
 		}
+	}
+	if err := o.Tier.Validate(); err != nil {
+		return fmt.Errorf("object: %w", err)
 	}
 
 	if o.Size < 0 {

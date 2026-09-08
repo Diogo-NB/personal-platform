@@ -21,12 +21,14 @@ func TestLiftCommandHelp(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"skycrate lift <source-path> [object-category]",
-		"Directories are always traversed recursively",
+		"are always traversed recursively",
 		"no recursive flag is",
 		"most specific configured",
 		"ancestor mapping",
 		"descendant suffix interactively",
-		"File contents are not uploaded",
+		"upload it to Amazon S3",
+		"--yes",
+		"-y, --yes",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("help does not contain %q:\n%s", expected, output)
@@ -54,14 +56,15 @@ func TestLiftDirectoryRecursively(t *testing.T) {
 		writeCommandConfig(t),
 		nil,
 		"lift",
+		"--yes",
 		directory,
 		"documents",
 	)
 	if err != nil {
 		t.Fatalf("execute lift: %v", err)
 	}
-	const want = "Lifted metadata (mock): s3://test-bucket/documents/research-notes/draft.md\n" +
-		"Lifted metadata (mock): s3://test-bucket/documents/root-file.txt\n"
+	const want = "Lifted: s3://test-bucket/documents/research-notes/draft.md\n" +
+		"Lifted: s3://test-bucket/documents/root-file.txt\n"
 	if stdout != want || stderr != "" {
 		t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, want)
 	}
@@ -79,15 +82,99 @@ func TestLiftWithExplicitCategory(t *testing.T) {
 		writeCommandConfig(t),
 		nil,
 		"lift",
+		"-y",
 		filePath,
 		"BACKUPS/University/Thesis",
 	)
 	if err != nil {
 		t.Fatalf("execute lift: %v", err)
 	}
-	const want = "Lifted metadata (mock): s3://test-bucket/backups/university/thesis/my-report.pdf\n"
+	const want = "Lifted: s3://test-bucket/backups/university/thesis/my-report.pdf\n"
 	if stdout != want || stderr != "" {
 		t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, want)
+	}
+}
+
+func TestLiftRequestsConfirmation(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "My Report.PDF")
+	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdout, stderr, err := executeCommand(
+		t,
+		writeCommandConfig(t),
+		strings.NewReader("YES\n"),
+		"lift",
+		filePath,
+		"documents",
+	)
+	if err != nil {
+		t.Fatalf("execute lift: %v", err)
+	}
+	const want = "Lifted: s3://test-bucket/documents/my-report.pdf\n"
+	if stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+	for _, expected := range []string{
+		"Objects: 1\n",
+		"Total size: 5 bytes (0.000 GB)\n",
+		"Storage tier: instant\n",
+		"Continue with upload? [y/N]: ",
+	} {
+		if !strings.Contains(stderr, expected) {
+			t.Errorf("stderr does not contain %q:\n%s", expected, stderr)
+		}
+	}
+}
+
+func TestLiftCancellation(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdout, stderr, err := executeCommand(
+		t,
+		writeCommandConfig(t),
+		strings.NewReader("\n"),
+		"lift",
+		filePath,
+		"documents",
+	)
+	if err != nil {
+		t.Fatalf("execute lift: %v", err)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "Upload canceled.\n") {
+		t.Errorf("stderr = %q, want cancellation message", stderr)
+	}
+}
+
+func TestLiftConfirmationEOF(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdout, stderr, err := executeCommand(
+		t,
+		writeCommandConfig(t),
+		strings.NewReader(""),
+		"lift",
+		filePath,
+		"documents",
+	)
+	if err == nil || !strings.Contains(err.Error(), "read upload confirmation") {
+		t.Fatalf("Execute() error = %v, want upload confirmation error", err)
+	}
+	if stdout != "" || !strings.Contains(stderr, "Continue with upload? [y/N]: ") {
+		t.Errorf("output = (%q, %q)", stdout, stderr)
 	}
 }
 
@@ -103,12 +190,13 @@ func TestLiftInteractiveCategory(t *testing.T) {
 		writeCommandConfig(t),
 		strings.NewReader("9\n1\nUniversity / Computer Science\n"),
 		"lift",
+		"--yes",
 		filePath,
 	)
 	if err != nil {
 		t.Fatalf("execute interactive lift: %v", err)
 	}
-	const want = "Lifted metadata (mock): s3://test-bucket/backups/university/computer-science/thesis.pdf\n"
+	const want = "Lifted: s3://test-bucket/backups/university/computer-science/thesis.pdf\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
@@ -137,12 +225,13 @@ func TestLiftInteractiveCategoryRetriesInvalidSuffix(t *testing.T) {
 		writeCommandConfig(t),
 		strings.NewReader("1\nbad//suffix\nuniversity\n"),
 		"lift",
+		"--yes",
 		filePath,
 	)
 	if err != nil {
 		t.Fatalf("execute interactive lift: %v", err)
 	}
-	if stdout != "Lifted metadata (mock): s3://test-bucket/backups/university/file.txt\n" {
+	if stdout != "Lifted: s3://test-bucket/backups/university/file.txt\n" {
 		t.Errorf("stdout = %q", stdout)
 	}
 	if !strings.Contains(stderr, "Invalid subcategory:") {

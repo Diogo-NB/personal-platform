@@ -7,19 +7,20 @@ import (
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/category"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/object"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/out"
 )
 
 type stubRepository struct {
-	saved       []object.Object
+	saved       []out.SaveRequest
 	findRequest out.FindManyRequest
 	objects     []object.Object
 	saveErr     error
 	findErr     error
 }
 
-func (r *stubRepository) Save(_ context.Context, storedObject object.Object) error {
-	r.saved = append(r.saved, storedObject)
+func (r *stubRepository) Save(_ context.Context, request out.SaveRequest) error {
+	r.saved = append(r.saved, request)
 	return r.saveErr
 }
 
@@ -34,9 +35,9 @@ func (r *stubRepository) FindMany(
 func newTestCatalog(t *testing.T) *category.Catalog {
 	t.Helper()
 
-	catalog, err := category.NewCatalog(map[string]string{
-		"backup":            "GLACIER",
-		"backup/university": "DEEP_ARCHIVE",
+	catalog, err := category.NewCatalog(map[string]storage.Tier{
+		"backup":            storage.TierCold,
+		"backup/university": storage.TierArchive,
 	})
 	if err != nil {
 		t.Fatalf("category.NewCatalog() error: %v", err)
@@ -51,7 +52,7 @@ func newTestObject(t *testing.T, name string, size int64) object.Object {
 		RelativePath: name,
 		Category:     "backup",
 		Size:         size,
-		Tier:         "GLACIER",
+		Tier:         storage.TierCold,
 		Timestamp:    time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {

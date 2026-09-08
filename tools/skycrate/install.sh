@@ -162,10 +162,15 @@ if [ ! -e "$config_path" ] && [ ! -L "$config_path" ]; then
 		set -C
 		cat >"$config_path" <<'EOF'
 bucket: skycrate-storage
+region: us-east-1
 
 categories:
+  backup:
+    tier: archive
+  recordings:
+    tier: cold
   documents:
-    tier: STANDARD
+    tier: instant
 EOF
 	) 2>/dev/null; then
 		config_created="true"

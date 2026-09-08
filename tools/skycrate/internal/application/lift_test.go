@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/in"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/out"
 )
 
@@ -57,17 +59,24 @@ func TestLiftServiceLift(t *testing.T) {
 		t.Fatalf("NewLiftService() error: %v", err)
 	}
 
-	got, err := service.Lift(t.Context(), filePath, "BACKUP/University/Thesis")
+	result, err := service.Lift(
+		t.Context(),
+		approvedLiftRequest(filePath, "BACKUP/University/Thesis"),
+	)
 	if err != nil {
 		t.Fatalf("Lift() error: %v", err)
 	}
+	got := result.Objects
 	if len(got) != 1 {
 		t.Fatalf("Lift() object count = %d, want 1", len(got))
 	}
-	if len(repository.saved) != 1 || got[0] != repository.saved[0] {
+	if len(repository.saved) != 1 || got[0] != repository.saved[0].StoredObject {
 		t.Fatalf("saved objects = %#v, result = %#v", repository.saved, got)
 	}
-	if got[0].Path != "backup/university/thesis/my-report.pdf" || got[0].Tier != "DEEP_ARCHIVE" {
+	if repository.saved[0].SourcePath != filePath {
+		t.Errorf("Save() source path = %q, want %q", repository.saved[0].SourcePath, filePath)
+	}
+	if got[0].Path != "backup/university/thesis/my-report.pdf" || got[0].Tier != storage.TierArchive {
 		t.Errorf("Lift() = %#v", got[0])
 	}
 	if got[0].Size != 5 || !got[0].CreatedAt.Equal(now.UTC()) || !got[0].UpdatedAt.Equal(now.UTC()) {
@@ -93,10 +102,11 @@ func TestLiftServiceLiftsDirectoryRecursively(t *testing.T) {
 		t.Fatalf("NewLiftService() error: %v", err)
 	}
 
-	objects, err := service.Lift(t.Context(), directory, "backup")
+	result, err := service.Lift(t.Context(), approvedLiftRequest(directory, "backup"))
 	if err != nil {
 		t.Fatalf("Lift() error: %v", err)
 	}
+	objects := result.Objects
 	wantPaths := []string{
 		"backup/research-notes/draft-one.md",
 		"backup/research-notes/final.pdf",
@@ -106,10 +116,10 @@ func TestLiftServiceLiftsDirectoryRecursively(t *testing.T) {
 		t.Fatalf("object counts = (%d, %d), want %d", len(objects), len(repository.saved), len(wantPaths))
 	}
 	for index, wantPath := range wantPaths {
-		if objects[index].Path != wantPath || repository.saved[index] != objects[index] {
+		if objects[index].Path != wantPath || repository.saved[index].StoredObject != objects[index] {
 			t.Errorf("object %d = %#v, want path %q", index, objects[index], wantPath)
 		}
-		if objects[index].Category != "backup" || objects[index].Tier != "GLACIER" {
+		if objects[index].Category != "backup" || objects[index].Tier != storage.TierCold {
 			t.Errorf("object %d routing = %#v", index, objects[index])
 		}
 		if !objects[index].CreatedAt.Equal(now) || !objects[index].UpdatedAt.Equal(now) {
@@ -121,6 +131,117 @@ func TestLiftServiceLiftsDirectoryRecursively(t *testing.T) {
 				now,
 			)
 		}
+	}
+}
+
+func TestLiftServiceRequestsApprovalBeforeSaving(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	writeLiftFixture(t, filepath.Join(directory, "first.txt"), "four")
+	writeLiftFixture(t, filepath.Join(directory, "second.txt"), "123456")
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+
+	var gotSummary in.LiftSummary
+	result, err := service.Lift(t.Context(), in.LiftRequest{
+		SourcePath: directory,
+		Category:   "backup",
+		Approve: func(_ context.Context, summary in.LiftSummary) (bool, error) {
+			if len(repository.saved) != 0 {
+				t.Fatalf("Save() calls before approval = %d, want 0", len(repository.saved))
+			}
+			gotSummary = summary
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Lift() error: %v", err)
+	}
+	if result.IsCanceled {
+		t.Fatal("Lift() canceled = true, want false")
+	}
+	if gotSummary.ObjectCount != 2 || gotSummary.TotalBytes != 10 {
+		t.Errorf("approval summary = %#v, want 2 objects and 10 bytes", gotSummary)
+	}
+	if gotSummary.Tier != storage.TierCold {
+		t.Errorf("approval tier = %q, want %q", gotSummary.Tier, storage.TierCold)
+	}
+	if len(repository.saved) != 2 {
+		t.Errorf("Save() calls = %d, want 2", len(repository.saved))
+	}
+}
+
+func TestLiftServiceCancelsBeforeSaving(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "file.txt")
+	writeLiftFixture(t, filePath, "data")
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+
+	request := approvedLiftRequest(filePath, "backup")
+	request.Approve = func(context.Context, in.LiftSummary) (bool, error) {
+		return false, nil
+	}
+	result, err := service.Lift(t.Context(), request)
+	if err != nil {
+		t.Fatalf("Lift() error: %v", err)
+	}
+	if !result.IsCanceled || len(result.Objects) != 0 {
+		t.Errorf("Lift() result = %#v, want canceled with no objects", result)
+	}
+	if len(repository.saved) != 0 {
+		t.Errorf("Save() calls = %d, want 0", len(repository.saved))
+	}
+}
+
+func TestLiftServicePropagatesApprovalError(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "file.txt")
+	writeLiftFixture(t, filePath, "data")
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+
+	approvalErr := errors.New("input unavailable")
+	request := approvedLiftRequest(filePath, "backup")
+	request.Approve = func(context.Context, in.LiftSummary) (bool, error) {
+		return false, approvalErr
+	}
+	_, err = service.Lift(t.Context(), request)
+	if !errors.Is(err, approvalErr) {
+		t.Fatalf("Lift() error = %v, want approval error", err)
+	}
+	if len(repository.saved) != 0 {
+		t.Errorf("Save() calls = %d, want 0", len(repository.saved))
+	}
+}
+
+func TestLiftServiceRequiresApproval(t *testing.T) {
+	t.Parallel()
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+
+	_, err = service.Lift(t.Context(), in.LiftRequest{})
+	if err == nil || !strings.Contains(err.Error(), "lift approval must not be nil") {
+		t.Fatalf("Lift() error = %v, want approval error", err)
 	}
 }
 
@@ -188,7 +309,10 @@ func TestLiftServiceRejectsInvalidInputs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewLiftService() error: %v", err)
 			}
-			if _, err := service.Lift(test.ctx(t), test.prepare(t), "backup"); err == nil {
+			if _, err := service.Lift(
+				test.ctx(t),
+				approvedLiftRequest(test.prepare(t), "backup"),
+			); err == nil {
 				t.Fatal("Lift() error = nil, want input error")
 			}
 			if len(repository.saved) != 0 {
@@ -213,7 +337,7 @@ func TestLiftServiceRejectsSymbolicLinkInDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLiftService() error: %v", err)
 	}
-	_, err = service.Lift(t.Context(), directory, "backup")
+	_, err = service.Lift(t.Context(), approvedLiftRequest(directory, "backup"))
 	if err == nil || !strings.Contains(err.Error(), "symbolic links are not supported") {
 		t.Fatalf("Lift() error = %v, want symbolic link error", err)
 	}
@@ -234,7 +358,7 @@ func TestLiftServiceRejectsNormalizedPathConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLiftService() error: %v", err)
 	}
-	_, err = service.Lift(t.Context(), directory, "backup")
+	_, err = service.Lift(t.Context(), approvedLiftRequest(directory, "backup"))
 	if err == nil || !strings.Contains(err.Error(), "normalized path conflicts") {
 		t.Fatalf("Lift() error = %v, want conflict error", err)
 	}
@@ -255,7 +379,7 @@ func TestLiftServicePropagatesRepositoryError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLiftService() error: %v", err)
 	}
-	_, err = service.Lift(t.Context(), filePath, "backup")
+	_, err = service.Lift(t.Context(), approvedLiftRequest(filePath, "backup"))
 	if err == nil || !strings.Contains(err.Error(), "save object \"backup/file.txt\": save failed") {
 		t.Fatalf("Lift() error = %v, want wrapped repository error", err)
 	}
@@ -268,5 +392,15 @@ func writeLiftFixture(t *testing.T, path string, contents string) {
 	}
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
+	}
+}
+
+func approvedLiftRequest(sourcePath string, categoryPath string) in.LiftRequest {
+	return in.LiftRequest{
+		SourcePath: sourcePath,
+		Category:   categoryPath,
+		Approve: func(context.Context, in.LiftSummary) (bool, error) {
+			return true, nil
+		},
 	}
 }

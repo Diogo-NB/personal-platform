@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -16,7 +17,7 @@ type Dependencies struct {
 	Lister  in.Lister
 }
 
-type Loader func(configPath string) (Dependencies, error)
+type Loader func(ctx context.Context, configPath string) (Dependencies, error)
 
 type commandRuntime struct {
 	configPath   string
@@ -29,19 +30,16 @@ func New(load Loader) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "skycrate",
 		Short: "Manage files in cloud storage",
-		Long: `Skycrate routes local file and directory metadata through hierarchical object categories.
-It uses one configured bucket, resolves each category to a storage tier, and
-summarizes objects returned by the configured storage repository.
-
-The current S3 repository is mocked. Lift validates and models local files,
-recursively traversing directories, but stores only metadata; list returns
-deterministic mocked objects.`,
+		Long: `Skycrate routes local files and directories through hierarchical object categories.
+It uses one configured bucket, resolves each category to a semantic storage
+tier, uploads files to Amazon S3, and summarizes stored objects. Directory lifts
+are validated and traversed recursively before uploading begins.`,
 		Example: `  skycrate --config ./skycrate.yaml lift ./report.pdf documents
-  skycrate --config ./skycrate.yaml list --category backups`,
+	  skycrate --config ./skycrate.yaml list --category backup`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		PersistentPreRunE: func(*cobra.Command, []string) error {
-			return runtime.initialize()
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return runtime.initialize(cmd.Context())
 		},
 	}
 
@@ -56,12 +54,12 @@ deterministic mocked objects.`,
 	return rootCmd
 }
 
-func (r *commandRuntime) initialize() error {
+func (r *commandRuntime) initialize(ctx context.Context) error {
 	if r.load == nil {
 		return errors.New("load application dependencies: loader must not be nil")
 	}
 
-	dependencies, err := r.load(r.configPath)
+	dependencies, err := r.load(ctx, r.configPath)
 	if err != nil {
 		return fmt.Errorf("load application dependencies: %w", err)
 	}

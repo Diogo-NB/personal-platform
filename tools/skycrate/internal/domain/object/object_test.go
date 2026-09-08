@@ -3,6 +3,8 @@ package object
 import (
 	"testing"
 	"time"
+
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 )
 
 func TestNew(t *testing.T) {
@@ -13,7 +15,7 @@ func TestNew(t *testing.T) {
 		RelativePath: " Research Notes / My Report.PDF ",
 		Category:     " Back Ups / University ",
 		Size:         42,
-		Tier:         "GLACIER",
+		Tier:         storage.TierCold,
 		Timestamp:    timestamp,
 	})
 	if err != nil {
@@ -26,7 +28,7 @@ func TestNew(t *testing.T) {
 	if got.Name != "my-report.pdf" || got.Category != "back-ups/university" {
 		t.Errorf("normalized identity = %#v", got)
 	}
-	if got.Size != 42 || got.Tier != "GLACIER" {
+	if got.Size != 42 || got.Tier != storage.TierCold {
 		t.Errorf("metadata = (%d, %q)", got.Size, got.Tier)
 	}
 	if !got.CreatedAt.Equal(timestamp.UTC()) || !got.UpdatedAt.Equal(timestamp.UTC()) {
@@ -43,7 +45,7 @@ func TestRehydratePreservesProviderValues(t *testing.T) {
 		Name:      "My Report.PDF",
 		Category:  "Backups/University",
 		Size:      12,
-		Tier:      "GLACIER",
+		Tier:      storage.TierCold,
 		CreatedAt: createdAt,
 		UpdatedAt: createdAt.Add(time.Hour),
 	})

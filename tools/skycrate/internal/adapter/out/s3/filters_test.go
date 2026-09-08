@@ -19,10 +19,7 @@ func TestCategoryMatches(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := categoryMatches(test.category, test.filter)
-			if err != nil {
-				t.Fatalf("categoryMatches() error: %v", err)
-			}
+			got := categoryMatches(test.category, test.filter)
 			if got != test.want {
 				t.Errorf("categoryMatches(%q, %q) = %t, want %t", test.category, test.filter, got, test.want)
 			}

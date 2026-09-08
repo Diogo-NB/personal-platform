@@ -5,10 +5,9 @@ to hierarchical object categories and routes those categories to cloud-storage
 tiers. It uses one configured bucket and isolates storage access behind an
 object repository.
 
-Skycrate currently uses a mocked S3 repository. `lift` validates a local file or
-recursively traverses a directory, creates storage metadata for every file, and
-acknowledges each save without uploading file contents. `list` summarizes
-deterministic mocked objects.
+Skycrate uses the AWS SDK for Go v2. `lift` validates a local file or recursively
+traverses a directory, then uploads every file with the AWS S3 transfer manager.
+`list` summarizes Skycrate-managed objects stored in the configured bucket.
 
 ## Install
 
@@ -41,21 +40,20 @@ go build -o skycrate .
 
 ## Configuration
 
-Skycrate requires a YAML configuration containing one bucket and at least one
-category-to-tier mapping:
+Skycrate requires a YAML configuration containing one bucket, one AWS region,
+and at least one category-to-tier mapping. The default configuration is:
 
 ```yaml
 bucket: skycrate-storage
+region: us-east-1
 
 categories:
+  backup:
+    tier: archive
+  recordings:
+    tier: cold
   documents:
-    tier: STANDARD
-  photos:
-    tier: STANDARD_IA
-  backups:
-    tier: DEEP_ARCHIVE
-  backups/university:
-    tier: GLACIER
+    tier: instant
 ```
 
 By default, Skycrate reads `skycrate/config.yaml` from the platform user
@@ -69,9 +67,22 @@ Use `--config` to select another file:
 skycrate --config ./skycrate.yaml list
 ```
 
-Bucket and tier values must not be blank or contain surrounding whitespace.
-Their casing is preserved. Category paths are normalized during application
-initialization.
+Bucket, region, and tier values must not be blank or contain surrounding
+whitespace. Tier input is case-insensitive and is normalized to one of three
+semantic storage tiers:
+
+| Storage tier | Initial S3 storage class | Lifecycle behavior |
+| --- | --- | --- |
+| `archive` | S3 Glacier Deep Archive (`DEEP_ARCHIVE`) | None |
+| `cold` | S3 Glacier Flexible Retrieval (`GLACIER`) | Transitions to Deep Archive after 365 days |
+| `instant` | S3 Glacier Instant Retrieval (`GLACIER_IR`) | None |
+
+These values are intentionally not raw S3 storage-class names. Category paths
+are normalized during application initialization.
+
+Skycrate uses the standard AWS SDK credential chain. Configure credentials with
+the same supported environment variables, shared AWS config/credentials files,
+or workload identity that other AWS SDK applications use.
 
 ## Hierarchical categories
 
@@ -82,23 +93,23 @@ Given this configuration:
 
 ```yaml
 categories:
-  backups:
-    tier: DEEP_ARCHIVE
-  backups/university:
-    tier: GLACIER
+  backup:
+    tier: archive
+  backup/university:
+    tier: cold
 ```
 
 the resolution behavior is:
 
 | Requested category | Matched mapping | Tier |
 | --- | --- | --- |
-| `backups` | `backups` | `DEEP_ARCHIVE` |
-| `backups/personal` | `backups` | `DEEP_ARCHIVE` |
-| `backups/university` | `backups/university` | `GLACIER` |
-| `backups/university/thesis` | `backups/university` | `GLACIER` |
+| `backup` | `backup` | `archive` |
+| `backup/personal` | `backup` | `archive` |
+| `backup/university` | `backup/university` | `cold` |
+| `backup/university/thesis` | `backup/university` | `cold` |
 
-Matching follows complete path segments. A mapping for `backups` does not match
-`backups-old`.
+Matching follows complete path segments. A mapping for `backup` does not match
+`backup-old`.
 
 Category segments and filenames are trimmed, lowercased, and converted to a
 conservative ASCII slug. Whitespace runs become `-`; letters, numbers, `.`, `_`,
@@ -114,26 +125,43 @@ skycrate lift <source-path> [object-category]
 With an explicit category:
 
 ```console
-$ skycrate lift "./My Thesis.PDF" backups/university/coursework
-Lifted metadata (mock): s3://skycrate-storage/backups/university/coursework/my-thesis.pdf
+$ skycrate lift --yes "./My Thesis.PDF" backup/university/coursework
+Lifted: s3://skycrate-storage/backup/university/coursework/my-thesis.pdf
 ```
 
 With a directory:
 
 ```console
-$ skycrate lift "./Research Notes" documents
-Lifted metadata (mock): s3://skycrate-storage/documents/drafts/outline.md
-Lifted metadata (mock): s3://skycrate-storage/documents/final-report.pdf
+$ skycrate lift --yes "./Research Notes" documents
+Lifted: s3://skycrate-storage/documents/drafts/outline.md
+Lifted: s3://skycrate-storage/documents/final-report.pdf
 ```
 
-Directories are always traversed recursively, matching the intended S3
-`--recursive` behavior; Skycrate does not expose a separate recursive flag. The
-source directory itself is not added to the object key. Each path relative to
-that directory is preserved and normalized, so `./Research Notes/Drafts/Outline.md`
-becomes `documents/drafts/outline.md` in the example above.
+Directories are always traversed recursively, matching S3 recursive transfer
+semantics; Skycrate does not expose a separate recursive flag. The source
+directory itself is not added to the object key. Each path relative to that
+directory is preserved and normalized, so
+`./Research Notes/Drafts/Outline.md` becomes
+`documents/drafts/outline.md` in the example above.
 
 The category can be an unconfigured descendant when one of its ancestors is
 configured.
+
+After validating the complete source and creating its objects, `lift` reports
+the object count, exact byte total, decimal-gigabyte total, and resolved storage
+tier on stderr. It then asks for confirmation:
+
+```text
+Objects: 3
+Total size: 1500000000 bytes (1.500 GB)
+Storage tier: cold
+Continue with upload? [y/N]:
+```
+
+Enter `y` or `yes`, case-insensitively, to upload. Enter `n`, `no`, or press
+Enter to cancel successfully without uploading anything. Other responses retry
+the prompt. Use `--yes` or `-y` to approve without printing the summary or
+prompt, which is useful for scripts.
 
 When the category is omitted, Skycrate displays the configured mappings as a
 numbered list on stderr. After a selection, it asks for an optional descendant
@@ -153,21 +181,18 @@ containing:
 - Resolved tier
 - UTC creation and update timestamps
 
-The mocked repository receives each complete object and returns success. File
-contents and local source paths are intentionally absent from the repository
-contract in this phase, so no bytes are uploaded or persisted.
-
-For inspection, the mock S3 repository prints the complete object to stderr
-using field names before Lift writes its success result to stdout. The diagnostic
-includes `Path`, `Name`, `Category`, `Size`, `Tier`, `CreatedAt`, and `UpdatedAt`.
+The S3 adapter uploads each regular file with a SHA-256 checksum, the storage
+class selected from its semantic tier, a `storage-tier` object tag, and
+Skycrate category/tier metadata. It also checks that the source size has not
+changed between traversal and upload.
 
 ## List objects
 
 ```console
 skycrate list
-skycrate list --category backups
-skycrate list --tier DEEP_ARCHIVE
-skycrate list --category backups --tier DEEP_ARCHIVE
+skycrate list --category backup
+skycrate list --tier archive
+skycrate list --category backup --tier archive
 ```
 
 Filters are case-insensitive and combine with AND semantics. A category filter
@@ -180,16 +205,10 @@ Objects: 3
 Total size: 10.000 GB
 ```
 
-The S3 repository currently returns these fixed objects:
-
-| Path | Category | Tier | Size |
-| --- | --- | --- | ---: |
-| `documents/report.pdf` | `documents` | `STANDARD` | 1 GB |
-| `photos/photo.jpg` | `photos` | `STANDARD_IA` | 2 GB |
-| `backups/database.dump` | `backups` | `DEEP_ARCHIVE` | 7 GB |
-
-These records are rehydrated as provider-owned data. Their paths, categories,
-tiers, sizes, and timestamps are not recomputed from current configuration.
+Listing is paginated and uses object metadata to distinguish Skycrate-managed
+objects from unrelated objects in the same bucket. Unmanaged or malformed
+objects are ignored. AWS list or metadata request failures are returned instead
+of being silently skipped.
 
 ## Architecture
 
@@ -200,7 +219,8 @@ driven (`out`) boundaries:
 internal/
 ├── domain/
 │   ├── category/              # Category paths, catalog, and tier resolution
-│   └── object/                # Object construction and validation
+│   ├── object/                # Object construction and validation
+│   └── storage/               # Semantic storage-tier enum and parsing
 ├── port/
 │   ├── in/                    # Lifter and Lister application contracts
 │   └── out/                   # ObjectRepository storage contract
@@ -211,30 +231,27 @@ internal/
 ├── adapter/
 │   ├── in/cli/                # Cobra commands and interactive input
 │   └── out/
-│       ├── s3/                # Mocked ObjectRepository implementation
+│       ├── s3/                # AWS SDK ObjectRepository implementation
 │       └── config/            # YAML configuration loader
 └── util/                      # Generic string normalization and slugging
 ```
 
 `LiftService` and `ListService` independently implement the input ports. Lift
-returns one object for a file or an ordered object slice for a recursive
-directory traversal. Both services depend on the combined `ObjectRepository`
-output port, which exposes
-`Save(context.Context, object.Object) error` and
+creates one object for a file or an ordered object slice for a recursive
+directory traversal, requests approval through a function supplied by the
+driving adapter, and returns a result that distinguishes cancellation from a
+completed upload. Both services depend on the combined `ObjectRepository`
+output port, which exposes `Save(context.Context, SaveRequest) error` and
 `FindMany(context.Context, FindManyRequest) ([]object.Object, error)`.
 
 The CLI adapter knows only the input ports and domain category catalog. Root
 `main.go` is the manual composition root: it loads configuration, constructs the
-mocked S3 repository, builds both services, and injects them into the CLI.
+AWS S3 client and transfer manager, builds both services, and injects them into
+the CLI.
 Domain packages do not import application, ports, adapters, Cobra, or Viper.
 
 ## Roadmap
 
-- Extend the save contract to carry file content or a source directory without
-  putting transient I/O state on the domain object. The real S3 adapter will
-  always use recursive transfer semantics.
-- Replace the mocked S3 behavior with AWS SDK upload and listing calls.
-- Tag uploaded objects with their complete category path.
 - Return provider upload metadata and elapsed milliseconds.
 - Add machine-readable output where it benefits automation.
 

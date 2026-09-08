@@ -5,27 +5,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 )
 
 func TestLoad(t *testing.T) {
 	t.Parallel()
 
 	path := writeConfig(t, `bucket: skycrate-storage
+region: us-east-1
 categories:
   "Back Ups":
-    tier: GLACIER
+    tier: cold
   "Back Ups / University":
-    tier: DEEP_ARCHIVE
+    tier: archive
 `)
 
 	got, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if got.Bucket != "skycrate-storage" || len(got.Categories) != 2 {
+	if got.Bucket != "skycrate-storage" || got.Region != "us-east-1" || len(got.Categories) != 2 {
 		t.Fatalf("Load() = %#v", got)
 	}
-	if got.Categories["back ups"] != "GLACIER" {
+	if got.Categories["back ups"] != storage.TierCold {
 		t.Errorf("raw category mapping was changed: %#v", got.Categories)
 	}
 }
@@ -38,9 +41,12 @@ func TestLoadRejectsInvalidConfigBoundary(t *testing.T) {
 		contents string
 		want     string
 	}{
-		{name: "missing bucket", contents: "categories:\n  backup:\n    tier: GLACIER\n", want: "bucket must not be empty"},
-		{name: "bucket whitespace", contents: "bucket: ' bucket '\ncategories:\n  backup:\n    tier: GLACIER\n", want: "bucket must not contain surrounding whitespace"},
-		{name: "missing categories", contents: "bucket: bucket\n", want: "categories must not be empty"},
+		{name: "missing bucket", contents: "region: us-east-1\ncategories:\n  backup:\n    tier: cold\n", want: "bucket must not be empty"},
+		{name: "bucket whitespace", contents: "bucket: ' bucket '\nregion: us-east-1\ncategories:\n  backup:\n    tier: cold\n", want: "bucket must not contain surrounding whitespace"},
+		{name: "missing region", contents: "bucket: bucket\ncategories:\n  backup:\n    tier: cold\n", want: "region must not be empty"},
+		{name: "region whitespace", contents: "bucket: bucket\nregion: ' us-east-1 '\ncategories:\n  backup:\n    tier: cold\n", want: "region must not contain surrounding whitespace"},
+		{name: "missing categories", contents: "bucket: bucket\nregion: us-east-1\n", want: "categories must not be empty"},
+		{name: "invalid tier", contents: "bucket: bucket\nregion: us-east-1\ncategories:\n  backup:\n    tier: GLACIER\n", want: "is invalid"},
 	}
 
 	for _, test := range tests {
@@ -72,7 +78,7 @@ func TestLoadDefaultPath(t *testing.T) {
 		t.Fatalf("create config directory: %v", err)
 	}
 	path := filepath.Join(directory, "config.yaml")
-	if err := os.WriteFile(path, []byte("bucket: bucket\ncategories:\n  backup:\n    tier: GLACIER\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("bucket: bucket\nregion: us-east-1\ncategories:\n  backup:\n    tier: cold\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

@@ -1,0 +1,10 @@
+bucket: skycrate-storage
+region: us-east-1
+
+categories:
+  backup:
+    tier: archive
+  recordings:
+    tier: cold
+  documents:
+    tier: instant

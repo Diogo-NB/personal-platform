@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/object"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/in"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/out"
 )
@@ -36,17 +37,30 @@ func TestListServiceList(t *testing.T) {
 
 	got, err := service.List(t.Context(), in.ListRequest{
 		Category: " BACKUP / University ",
-		Tier:     " DEEP_ARCHIVE ",
+		Tier:     "ARCHIVE",
 	})
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	wantRequest := out.FindManyRequest{Category: "backup/university", Tier: "deep_archive"}
+	wantRequest := out.FindManyRequest{Category: "backup/university", Tier: storage.TierArchive}
 	if repository.findRequest != wantRequest {
 		t.Errorf("FindMany() request = %#v, want %#v", repository.findRequest, wantRequest)
 	}
 	if got.ObjectCount != 2 || got.TotalBytes != 3_000_000_000 {
 		t.Errorf("List() = %#v", got)
+	}
+}
+
+func TestListServiceRejectsTierWhitespace(t *testing.T) {
+	t.Parallel()
+
+	repository := &stubRepository{}
+	service, err := NewListService(repository, newTestCatalog(t))
+	if err != nil {
+		t.Fatalf("NewListService() error: %v", err)
+	}
+	if _, err := service.List(t.Context(), in.ListRequest{Tier: " archive "}); err == nil {
+		t.Fatal("List() error = nil, want tier validation error")
 	}
 }
 

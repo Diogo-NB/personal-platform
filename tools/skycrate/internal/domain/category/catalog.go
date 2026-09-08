@@ -5,24 +5,26 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 )
 
 type Resolution struct {
 	Category string
-	Tier     string
+	Tier     storage.Tier
 }
 
 type Catalog struct {
-	tiers      map[string]string
+	tiers      map[string]storage.Tier
 	categories []string
 }
 
-func NewCatalog(categories map[string]string) (*Catalog, error) {
+func NewCatalog(categories map[string]storage.Tier) (*Catalog, error) {
 	if len(categories) == 0 {
 		return nil, errors.New("category catalog must not be empty")
 	}
 
-	tiers := make(map[string]string, len(categories))
+	tiers := make(map[string]storage.Tier, len(categories))
 	names := make([]string, 0, len(categories))
 	for category, tier := range categories {
 		normalized, err := NormalizePath(category)
@@ -32,11 +34,8 @@ func NewCatalog(categories map[string]string) (*Catalog, error) {
 		if _, exists := tiers[normalized]; exists {
 			return nil, fmt.Errorf("category %q is duplicated after normalization", normalized)
 		}
-		if strings.TrimSpace(tier) == "" {
-			return nil, fmt.Errorf("category %q tier must not be empty", normalized)
-		}
-		if strings.TrimSpace(tier) != tier {
-			return nil, fmt.Errorf("category %q tier must not contain surrounding whitespace", normalized)
+		if err := tier.Validate(); err != nil {
+			return nil, fmt.Errorf("category %q: %w", normalized, err)
 		}
 
 		tiers[normalized] = tier

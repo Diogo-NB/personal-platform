@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -46,44 +47,58 @@ func NewLiftService(
 
 func (s *LiftService) Lift(
 	ctx context.Context,
-	sourcePath string,
-	categoryPath string,
-) ([]object.Object, error) {
+	request in.LiftRequest,
+) (in.LiftResult, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("lift objects: %w", err)
+		return in.LiftResult{}, fmt.Errorf("lift objects: %w", err)
 	}
+	if request.Approve == nil {
+		return in.LiftResult{}, errors.New("lift approval must not be nil")
+	}
+
+	sourcePath := request.SourcePath
 	if sourcePath == "" {
-		return nil, errors.New("inspect source: path must not be empty")
+		return in.LiftResult{}, errors.New("inspect source: path must not be empty")
 	}
 	sourcePath = filepath.Clean(sourcePath)
 
 	info, err := os.Lstat(sourcePath)
 	if err != nil {
-		return nil, fmt.Errorf("inspect source %q: %w", sourcePath, err)
+		return in.LiftResult{}, fmt.Errorf("inspect source %q: %w", sourcePath, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("inspect source %q: symbolic links are not supported", sourcePath)
+		return in.LiftResult{}, fmt.Errorf(
+			"inspect source %q: symbolic links are not supported",
+			sourcePath,
+		)
 	}
 	if !info.Mode().IsRegular() && !info.IsDir() {
-		return nil, fmt.Errorf("inspect source %q: not a regular file or directory", sourcePath)
+		return in.LiftResult{}, fmt.Errorf(
+			"inspect source %q: not a regular file or directory",
+			sourcePath,
+		)
 	}
 
-	resolution, err := s.catalog.Resolve(categoryPath)
+	resolution, err := s.catalog.Resolve(request.Category)
 	if err != nil {
-		return nil, err
+		return in.LiftResult{}, err
 	}
 
 	files, err := collectFiles(ctx, sourcePath, info)
 	if err != nil {
-		return nil, err
+		return in.LiftResult{}, err
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("inspect directory %q: no regular files found", sourcePath)
+		return in.LiftResult{}, fmt.Errorf(
+			"inspect directory %q: no regular files found",
+			sourcePath,
+		)
 	}
 
 	timestamp := s.now()
 	objects := make([]object.Object, 0, len(files))
 	paths := make(map[string]string, len(files))
+	var totalBytes int64
 	for _, file := range files {
 		storedObject, err := object.New(object.NewParams{
 			RelativePath: file.relativePath,
@@ -93,24 +108,51 @@ func (s *LiftService) Lift(
 			Timestamp:    timestamp,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("create object for %q: %w", file.path, err)
+			return in.LiftResult{}, fmt.Errorf("create object for %q: %w", file.path, err)
 		}
 		if otherSource, exists := paths[storedObject.Path]; exists {
-			return nil, fmt.Errorf(
+			return in.LiftResult{}, fmt.Errorf(
 				"create object for %q: normalized path conflicts with %q",
 				file.path,
 				otherSource,
 			)
 		}
+		if file.size > math.MaxInt64-totalBytes {
+			return in.LiftResult{}, errors.New("calculate lift size: total size exceeds int64")
+		}
+
 		paths[storedObject.Path] = file.path
 		objects = append(objects, storedObject)
+		totalBytes += file.size
+	}
+
+	approved, err := request.Approve(ctx, in.LiftSummary{
+		ObjectCount: len(objects),
+		TotalBytes:  totalBytes,
+		Tier:        resolution.Tier,
+	})
+	if err != nil {
+		return in.LiftResult{}, fmt.Errorf("approve lift: %w", err)
+	}
+	if !approved {
+		return in.LiftResult{
+			Objects:    []object.Object{},
+			IsCanceled: true,
+		}, nil
 	}
 
 	for _, storedObject := range objects {
-		if err := s.repository.Save(ctx, storedObject); err != nil {
-			return nil, fmt.Errorf("save object %q: %w", storedObject.Path, err)
+		sourcePath := paths[storedObject.Path]
+		if err := s.repository.Save(ctx, out.SaveRequest{
+			SourcePath:   sourcePath,
+			StoredObject: storedObject,
+		}); err != nil {
+			return in.LiftResult{}, fmt.Errorf("save object %q: %w", storedObject.Path, err)
 		}
 	}
 
-	return objects, nil
+	return in.LiftResult{
+		Objects:    objects,
+		IsCanceled: false,
+	}, nil
 }

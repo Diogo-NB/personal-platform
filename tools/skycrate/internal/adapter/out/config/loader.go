@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 	"github.com/spf13/viper"
 )
 
@@ -41,14 +42,28 @@ func validate(raw fileConfig) (Config, error) {
 	if strings.TrimSpace(raw.Bucket) != raw.Bucket {
 		return Config{}, errors.New("bucket must not contain surrounding whitespace")
 	}
+	if strings.TrimSpace(raw.Region) == "" {
+		return Config{}, errors.New("region must not be empty")
+	}
+	if strings.TrimSpace(raw.Region) != raw.Region {
+		return Config{}, errors.New("region must not contain surrounding whitespace")
+	}
 	if len(raw.Categories) == 0 {
 		return Config{}, errors.New("categories must not be empty")
 	}
 
-	categories := make(map[string]string, len(raw.Categories))
+	categories := make(map[string]storage.Tier, len(raw.Categories))
 	for category, mapping := range raw.Categories {
-		categories[category] = mapping.Tier
+		tier, err := storage.Parse(mapping.Tier)
+		if err != nil {
+			return Config{}, fmt.Errorf("category %q: %w", category, err)
+		}
+		categories[category] = tier
 	}
 
-	return Config{Bucket: raw.Bucket, Categories: categories}, nil
+	return Config{
+		Bucket:     raw.Bucket,
+		Region:     raw.Region,
+		Categories: categories,
+	}, nil
 }

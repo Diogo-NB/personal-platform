@@ -8,8 +8,8 @@ These instructions apply to every task under `tools/skycrate/`.
   current CLI behavior, configuration, architecture, and development commands.
 - Inspect the relevant ports and their implementations before changing a
   contract. Update every adapter and test affected by a contract change.
-- Treat the current implementation as a mocked metadata workflow. Do not imply
-  that file contents reach S3 until the output port supports content transfer.
+- Treat the current implementation as a real AWS S3 workflow. Keep AWS SDK
+  concerns inside the S3 adapter and source-file transfer in the output port.
 
 ## Architecture
 
@@ -42,14 +42,17 @@ These instructions apply to every task under `tools/skycrate/`.
   directory. The source directory name itself is not part of the object key.
 - Reject symbolic links, special files, directory inputs with no regular files,
   and object-key collisions caused by normalization before saving any object.
+- Create and summarize every object before requesting lift approval. A rejected
+  approval must return successfully without saving any object.
 - Resolve storage tiers from the most specific configured category, falling
   back through complete ancestor segments.
 - Keep domain timestamps in UTC. Preserve provider-owned values when
   rehydrating listed objects.
 - Write command results to stdout. Write prompts, diagnostics, and errors to
   stderr. Use Cobra's command readers and writers so tests can capture I/O.
-- The mock S3 repository must print every complete object it receives, including
-  path, name, category, size, tier, and timestamps.
+- The S3 repository must upload file contents with Skycrate metadata and the
+  storage class selected from the semantic storage tier. Listings must ignore
+  objects that do not have valid Skycrate metadata.
 
 ## Go implementation rules
 

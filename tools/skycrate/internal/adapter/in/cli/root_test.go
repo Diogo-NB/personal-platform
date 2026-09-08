@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -11,9 +12,11 @@ import (
 	"time"
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/adapter/out/config"
-	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/adapter/out/s3"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/application"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/category"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/object"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/out"
 )
 
 func TestRootCommandHelp(t *testing.T) {
@@ -31,9 +34,9 @@ func TestRootCommandHelp(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"hierarchical object categories",
-		"current S3 repository is mocked",
-		"lift        Store local file or directory metadata by object category",
-		"list        Summarize stored object count and size",
+		"uploads files to Amazon S3",
+		"lift        Store a local file or directory in Amazon S3 by object category",
+		"list        Summarize stored S3 object count and size",
 		"--config string",
 	} {
 		if !strings.Contains(stdout.String(), expected) {
@@ -49,7 +52,7 @@ func TestCommandReportsLoaderFailure(t *testing.T) {
 	t.Parallel()
 
 	loadErr := errors.New("configuration unavailable")
-	command := New(func(string) (Dependencies, error) {
+	command := New(func(context.Context, string) (Dependencies, error) {
 		return Dependencies{}, loadErr
 	})
 	command.SetArgs([]string{"list"})
@@ -93,7 +96,7 @@ func executeCommand(
 	return stdout.String(), stderr.String(), err
 }
 
-func loadTestDependencies(configPath string) (Dependencies, error) {
+func loadTestDependencies(_ context.Context, configPath string) (Dependencies, error) {
 	loaded, err := config.Load(configPath)
 	if err != nil {
 		return Dependencies{}, err
@@ -102,10 +105,7 @@ func loadTestDependencies(configPath string) (Dependencies, error) {
 	if err != nil {
 		return Dependencies{}, err
 	}
-	repository, err := s3.New(loaded.Bucket, io.Discard)
-	if err != nil {
-		return Dependencies{}, err
-	}
+	repository := &testRepository{objects: testObjects()}
 	lifter, err := application.NewLiftService(repository, catalog, time.Now)
 	if err != nil {
 		return Dependencies{}, err
@@ -122,20 +122,66 @@ func loadTestDependencies(configPath string) (Dependencies, error) {
 	}, nil
 }
 
+type testRepository struct {
+	objects []object.Object
+}
+
+func (r *testRepository) Save(_ context.Context, _ out.SaveRequest) error {
+	return nil
+}
+
+func (r *testRepository) FindMany(
+	_ context.Context,
+	request out.FindManyRequest,
+) ([]object.Object, error) {
+	objects := make([]object.Object, 0, len(r.objects))
+	for _, storedObject := range r.objects {
+		if request.Category != "" &&
+			storedObject.Category != request.Category &&
+			!strings.HasPrefix(storedObject.Category, request.Category+"/") {
+			continue
+		}
+		if request.Tier != storage.TierUnknown && storedObject.Tier != request.Tier {
+			continue
+		}
+		objects = append(objects, storedObject)
+	}
+	return objects, nil
+}
+
+func testObjects() []object.Object {
+	timestamp := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	return []object.Object{
+		{
+			Path: "documents/report.pdf", Name: "report.pdf", Category: "documents",
+			Size: 1_000_000_000, Tier: storage.TierInstant, CreatedAt: timestamp, UpdatedAt: timestamp,
+		},
+		{
+			Path: "photos/image.jpg", Name: "image.jpg", Category: "photos",
+			Size: 2_000_000_000, Tier: storage.TierCold, CreatedAt: timestamp, UpdatedAt: timestamp,
+		},
+		{
+			Path: "backups/archive.tar", Name: "archive.tar", Category: "backups",
+			Size: 7_000_000_000, Tier: storage.TierArchive, CreatedAt: timestamp, UpdatedAt: timestamp,
+		},
+	}
+}
+
 func writeCommandConfig(t *testing.T) string {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	contents := `bucket: test-bucket
+region: us-east-1
 categories:
   documents:
-    tier: STANDARD
+    tier: instant
   photos:
-    tier: STANDARD_IA
+    tier: cold
   backups:
-    tier: DEEP_ARCHIVE
+    tier: archive
   backups/university:
-    tier: GLACIER
+    tier: cold
 `
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)

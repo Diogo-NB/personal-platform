@@ -17,14 +17,14 @@ func newListCommand(runtime *commandRuntime) *cobra.Command {
 
 	listCmd := &cobra.Command{
 		Use:   "list",
-		Short: "Summarize stored object count and size",
-		Long: `Summarize objects returned by the mocked S3 repository. Results can be
-filtered by category subtree and storage tier. Multiple filters use AND
+		Short: "Summarize stored S3 object count and size",
+		Long: `Summarize Skycrate-managed objects in Amazon S3. Results can be filtered
+by category subtree and semantic storage tier. Multiple filters use AND
 semantics. Object count and combined size are reported in decimal gigabytes.`,
 		Example: `  skycrate list
-  skycrate list --category backups
-  skycrate list --tier DEEP_ARCHIVE
-  skycrate list --category backups --tier DEEP_ARCHIVE`,
+	  skycrate list --category backup
+	  skycrate list --tier archive
+	  skycrate list --category backup --tier archive`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cmd.Flags().Changed("category") && strings.TrimSpace(categoryPath) == "" {
@@ -56,7 +56,7 @@ semantics. Object count and combined size are reported in decimal gigabytes.`,
 	}
 
 	listCmd.Flags().StringVar(&categoryPath, "category", "", "filter by category subtree")
-	listCmd.Flags().StringVar(&tier, "tier", "", "filter by storage tier")
+	listCmd.Flags().StringVar(&tier, "tier", "", "filter by semantic storage tier")
 
 	return listCmd
 }

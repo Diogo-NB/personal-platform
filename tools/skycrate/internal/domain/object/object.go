@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/category"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 )
 
 type Object struct {
@@ -13,7 +14,7 @@ type Object struct {
 	Name      string
 	Category  string
 	Size      int64
-	Tier      string
+	Tier      storage.Tier
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -22,7 +23,7 @@ type NewParams struct {
 	RelativePath string
 	Category     string
 	Size         int64
-	Tier         string
+	Tier         storage.Tier
 	Timestamp    time.Time
 }
 
@@ -31,7 +32,7 @@ type RehydrateParams struct {
 	Name      string
 	Category  string
 	Size      int64
-	Tier      string
+	Tier      storage.Tier
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

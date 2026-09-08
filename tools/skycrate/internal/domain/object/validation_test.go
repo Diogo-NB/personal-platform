@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 )
 
 func TestValidate(t *testing.T) {
@@ -15,7 +17,7 @@ func TestValidate(t *testing.T) {
 		Name:      "report.pdf",
 		Category:  "backups",
 		Size:      1,
-		Tier:      "GLACIER",
+		Tier:      storage.TierCold,
 		CreatedAt: createdAt,
 		UpdatedAt: createdAt,
 	}
@@ -27,7 +29,7 @@ func TestValidate(t *testing.T) {
 		{name: "empty path", mutate: func(o *Object) { o.Path = "" }},
 		{name: "empty name", mutate: func(o *Object) { o.Name = " " }},
 		{name: "empty category", mutate: func(o *Object) { o.Category = "" }},
-		{name: "empty tier", mutate: func(o *Object) { o.Tier = "" }},
+		{name: "empty tier", mutate: func(o *Object) { o.Tier = storage.TierUnknown }},
 		{name: "negative size", mutate: func(o *Object) { o.Size = -1 }},
 		{name: "zero created", mutate: func(o *Object) { o.CreatedAt = time.Time{} }},
 		{name: "zero updated", mutate: func(o *Object) { o.UpdatedAt = time.Time{} }},

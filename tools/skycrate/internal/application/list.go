@@ -7,9 +7,9 @@ import (
 	"math"
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/category"
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/in"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/out"
-	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/util"
 )
 
 var _ in.Lister = (*ListService)(nil)
@@ -50,9 +50,9 @@ func (s *ListService) List(
 		normalized.Category = resolution.Category
 	}
 	if request.Tier != "" {
-		tier, err := util.Normalize(request.Tier)
+		tier, err := storage.Parse(request.Tier)
 		if err != nil {
-			return in.Summary{}, fmt.Errorf("normalize tier: %w", err)
+			return in.Summary{}, fmt.Errorf("parse tier: %w", err)
 		}
 		normalized.Tier = tier
 	}
