@@ -224,6 +224,8 @@ func (r *Repository) rehydrate(
 
 func storageClassFor(tier storage.Tier) (transfertypes.StorageClass, error) {
 	switch tier {
+	case storage.TierDefault:
+		return transfertypes.StorageClassStandard, nil
 	case storage.TierArchive:
 		return transfertypes.StorageClassDeepArchive, nil
 	case storage.TierCold:

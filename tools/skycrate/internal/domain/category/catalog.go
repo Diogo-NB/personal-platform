@@ -53,7 +53,8 @@ func (c *Catalog) Categories() []string {
 	return append([]string{}, c.categories...)
 }
 
-// Resolve uses the most specific configured ancestor while preserving the full category path.
+// Resolve preserves the full category path and uses the most specific configured
+// ancestor, falling back to the default tier.
 func (c *Catalog) Resolve(value string) (Resolution, error) {
 	normalized, err := NormalizePath(value)
 	if err != nil {
@@ -73,5 +74,5 @@ func (c *Catalog) Resolve(value string) (Resolution, error) {
 		candidate = candidate[:separator]
 	}
 
-	return Resolution{}, fmt.Errorf("category %q is not configured", normalized)
+	return Resolution{Category: normalized, Tier: storage.TierDefault}, nil
 }

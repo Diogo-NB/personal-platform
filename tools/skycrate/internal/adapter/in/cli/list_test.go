@@ -46,6 +46,8 @@ func TestList(t *testing.T) {
 		{name: "tier", args: []string{"--tier", "cold"}, want: "Objects: 1\nTotal size: 2.000 GB\n"},
 		{name: "combined", args: []string{"--category", "documents", "--tier", "INSTANT"}, want: "Objects: 1\nTotal size: 1.000 GB\n"},
 		{name: "no matches", args: []string{"--category", "backups/university"}, want: "Objects: 0\nTotal size: 0.000 GB\n"},
+		{name: "unconfigured category", args: []string{"--category", "test"}, want: "Objects: 0\nTotal size: 0.000 GB\n"},
+		{name: "default tier", args: []string{"--tier", "DEFAULT"}, want: "Objects: 0\nTotal size: 0.000 GB\n"},
 	}
 
 	for _, test := range tests {
@@ -73,7 +75,6 @@ func TestListRejectsInvalidFilters(t *testing.T) {
 	}{
 		{name: "blank category", args: []string{"--category", " "}, want: "category filter must not be empty"},
 		{name: "blank tier", args: []string{"--tier", " "}, want: "tier filter must not be empty"},
-		{name: "unconfigured category", args: []string{"--category", "unknown"}, want: "is not configured"},
 		{name: "invalid tier", args: []string{"--tier", "GLACIER"}, want: "is invalid"},
 		{name: "tier whitespace", args: []string{"--tier", " archive "}, want: "surrounding whitespace"},
 		{name: "removed tier flag", args: []string{"--s3-tier", "archive"}, want: "unknown flag: --s3-tier"},

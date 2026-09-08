@@ -25,6 +25,7 @@ func TestLiftCommandHelp(t *testing.T) {
 		"no recursive flag is",
 		"most specific configured",
 		"ancestor mapping",
+		"default tier",
 		"descendant suffix interactively",
 		"upload it to Amazon S3",
 		"--yes",
@@ -92,6 +93,32 @@ func TestLiftWithExplicitCategory(t *testing.T) {
 	const want = "Lifted: s3://test-bucket/backups/university/thesis/my-report.pdf\n"
 	if stdout != want || stderr != "" {
 		t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, want)
+	}
+}
+
+func TestLiftWithUnconfiguredCategory(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	stdout, stderr, err := executeCommand(
+		t,
+		writeCommandConfig(t),
+		strings.NewReader("y\n"),
+		"lift",
+		filePath,
+		"test",
+	)
+	if err != nil {
+		t.Fatalf("execute lift: %v", err)
+	}
+	if stdout != "Lifted: s3://test-bucket/test/file.txt\n" {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "Storage tier: default\n") {
+		t.Errorf("stderr = %q, want default tier summary", stderr)
 	}
 }
 

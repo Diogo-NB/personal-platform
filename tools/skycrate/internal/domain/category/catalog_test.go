@@ -68,6 +68,7 @@ func TestCatalogResolve(t *testing.T) {
 	catalog, err := NewCatalog(map[string]storage.Tier{
 		"backup":            storage.TierCold,
 		"backup/university": storage.TierArchive,
+		"documents":         storage.TierInstant,
 	})
 	if err != nil {
 		t.Fatalf("NewCatalog() error: %v", err)
@@ -83,8 +84,10 @@ func TestCatalogResolve(t *testing.T) {
 		{name: "exact", category: "backup", wantCategory: "backup", wantTier: storage.TierCold},
 		{name: "ancestor", category: "BACKUP/Personal/Photos", wantCategory: "backup/personal/photos", wantTier: storage.TierCold},
 		{name: "specific", category: "backup/university/thesis", wantCategory: "backup/university/thesis", wantTier: storage.TierArchive},
-		{name: "segment boundary", category: "backup-old", wantErr: true},
-		{name: "unconfigured root", category: "documents", wantErr: true},
+		{name: "configured ancestor", category: "documents/test", wantCategory: "documents/test", wantTier: storage.TierInstant},
+		{name: "segment boundary fallback", category: "backup-old", wantCategory: "backup-old", wantTier: storage.TierDefault},
+		{name: "unconfigured root", category: "test", wantCategory: "test", wantTier: storage.TierDefault},
+		{name: "invalid path", category: "backup//test", wantErr: true},
 	}
 
 	for _, test := range tests {

@@ -9,6 +9,7 @@ func TestParse(t *testing.T) {
 		input string
 		want  Tier
 	}{
+		{input: "DEFAULT", want: TierDefault},
 		{input: "archive", want: TierArchive},
 		{input: "COLD", want: TierCold},
 		{input: "Instant", want: TierInstant},

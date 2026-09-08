@@ -45,7 +45,7 @@ These instructions apply to every task under `tools/skycrate/`.
 - Create and summarize every object before requesting lift approval. A rejected
   approval must return successfully without saving any object.
 - Resolve storage tiers from the most specific configured category, falling
-  back through complete ancestor segments.
+  back through complete ancestor segments and then to the `default` tier.
 - Keep domain timestamps in UTC. Preserve provider-owned values when
   rehydrating listed objects.
 - Write command results to stdout. Write prompts, diagnostics, and errors to

@@ -84,6 +84,39 @@ func TestLiftServiceLift(t *testing.T) {
 	}
 }
 
+func TestLiftServiceUsesDefaultTierForUnconfiguredCategory(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "file.txt")
+	writeLiftFixture(t, filePath, "data")
+
+	repository := &stubRepository{}
+	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
+	if err != nil {
+		t.Fatalf("NewLiftService() error: %v", err)
+	}
+
+	var summary in.LiftSummary
+	request := approvedLiftRequest(filePath, "Test")
+	request.Approve = func(_ context.Context, got in.LiftSummary) (bool, error) {
+		summary = got
+		return true, nil
+	}
+	result, err := service.Lift(t.Context(), request)
+	if err != nil {
+		t.Fatalf("Lift() error: %v", err)
+	}
+	if len(result.Objects) != 1 || len(repository.saved) != 1 {
+		t.Fatalf("object counts = (%d, %d), want (1, 1)", len(result.Objects), len(repository.saved))
+	}
+	if result.Objects[0].Category != "test" || result.Objects[0].Tier != storage.TierDefault {
+		t.Errorf("Lift() routing = %#v", result.Objects[0])
+	}
+	if summary.Tier != storage.TierDefault {
+		t.Errorf("approval tier = %q, want %q", summary.Tier, storage.TierDefault)
+	}
+}
+
 func TestLiftServiceLiftsDirectoryRecursively(t *testing.T) {
 	t.Parallel()
 

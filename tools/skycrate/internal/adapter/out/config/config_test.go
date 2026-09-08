@@ -19,17 +19,22 @@ categories:
     tier: cold
   "Back Ups / University":
     tier: archive
+  Scratch:
+    tier: DEFAULT
 `)
 
 	got, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if got.Bucket != "skycrate-storage" || got.Region != "us-east-1" || len(got.Categories) != 2 {
+	if got.Bucket != "skycrate-storage" || got.Region != "us-east-1" || len(got.Categories) != 3 {
 		t.Fatalf("Load() = %#v", got)
 	}
 	if got.Categories["back ups"] != storage.TierCold {
 		t.Errorf("raw category mapping was changed: %#v", got.Categories)
+	}
+	if got.Categories["scratch"] != storage.TierDefault {
+		t.Errorf("default tier mapping = %q, want %q", got.Categories["scratch"], storage.TierDefault)
 	}
 }
 

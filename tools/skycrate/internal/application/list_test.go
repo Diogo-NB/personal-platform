@@ -51,6 +51,25 @@ func TestListServiceList(t *testing.T) {
 	}
 }
 
+func TestListServiceAllowsUnconfiguredCategoryAndDefaultTier(t *testing.T) {
+	t.Parallel()
+
+	repository := &stubRepository{}
+	service, err := NewListService(repository, newTestCatalog(t))
+	if err != nil {
+		t.Fatalf("NewListService() error: %v", err)
+	}
+
+	_, err = service.List(t.Context(), in.ListRequest{Category: "Test", Tier: "DEFAULT"})
+	if err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	wantRequest := out.FindManyRequest{Category: "test", Tier: storage.TierDefault}
+	if repository.findRequest != wantRequest {
+		t.Errorf("FindMany() request = %#v, want %#v", repository.findRequest, wantRequest)
+	}
+}
+
 func TestListServiceRejectsTierWhitespace(t *testing.T) {
 	t.Parallel()
 

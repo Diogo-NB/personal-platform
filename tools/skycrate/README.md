@@ -68,11 +68,12 @@ skycrate --config ./skycrate.yaml list
 ```
 
 Bucket, region, and tier values must not be blank or contain surrounding
-whitespace. Tier input is case-insensitive and is normalized to one of three
+whitespace. Tier input is case-insensitive and is normalized to one of four
 semantic storage tiers:
 
 | Storage tier | Initial S3 storage class | Lifecycle behavior |
 | --- | --- | --- |
+| `default` | S3 Standard (`STANDARD`) | None |
 | `archive` | S3 Glacier Deep Archive (`DEEP_ARCHIVE`) | None |
 | `cold` | S3 Glacier Flexible Retrieval (`GLACIER`) | Transitions to Deep Archive after 365 days |
 | `instant` | S3 Glacier Instant Retrieval (`GLACIER_IR`) | None |
@@ -97,6 +98,8 @@ categories:
     tier: archive
   backup/university:
     tier: cold
+  documents:
+    tier: instant
 ```
 
 the resolution behavior is:
@@ -107,9 +110,11 @@ the resolution behavior is:
 | `backup/personal` | `backup` | `archive` |
 | `backup/university` | `backup/university` | `cold` |
 | `backup/university/thesis` | `backup/university` | `cold` |
+| `documents/test` | `documents` | `instant` |
+| `test` | None | `default` |
 
 Matching follows complete path segments. A mapping for `backup` does not match
-`backup-old`.
+`backup-old`; without another matching ancestor, `backup-old` uses `default`.
 
 Category segments and filenames are trimmed, lowercased, and converted to a
 conservative ASCII slug. Whitespace runs become `-`; letters, numbers, `.`, `_`,
@@ -145,7 +150,8 @@ directory is preserved and normalized, so
 `documents/drafts/outline.md` in the example above.
 
 The category can be an unconfigured descendant when one of its ancestors is
-configured.
+configured. A category with no configured ancestor uses the `default` tier and
+is stored in S3 Standard.
 
 After validating the complete source and creating its objects, `lift` reports
 the object count, exact byte total, decimal-gigabyte total, and resolved storage
@@ -193,6 +199,7 @@ skycrate list
 skycrate list --category backup
 skycrate list --tier archive
 skycrate list --category backup --tier archive
+skycrate list --tier default
 ```
 
 Filters are case-insensitive and combine with AND semantics. A category filter

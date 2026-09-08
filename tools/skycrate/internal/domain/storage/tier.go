@@ -9,6 +9,7 @@ type Tier string
 
 const (
 	TierUnknown Tier = ""
+	TierDefault Tier = "default"
 	TierArchive Tier = "archive"
 	TierCold    Tier = "cold"
 	TierInstant Tier = "instant"
@@ -29,11 +30,11 @@ func Parse(value string) (Tier, error) {
 
 func (t Tier) Validate() error {
 	switch t {
-	case TierArchive, TierCold, TierInstant:
+	case TierDefault, TierArchive, TierCold, TierInstant:
 		return nil
 	default:
 		return fmt.Errorf(
-			"storage tier %q is invalid; supported values are archive, cold, and instant",
+			"storage tier %q is invalid; supported values are default, archive, cold, and instant",
 			t,
 		)
 	}

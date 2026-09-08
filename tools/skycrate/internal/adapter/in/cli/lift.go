@@ -17,7 +17,8 @@ func newLiftCommand(runtime *commandRuntime) *cobra.Command {
 		Long: `Validate a local file or directory and upload it to Amazon S3. Directories
 are always traversed recursively; no recursive flag is required. Categories are
 slash-delimited paths. The most specific configured category mapping selects the
-semantic storage tier; otherwise an ancestor mapping is used.
+semantic storage tier; otherwise an ancestor mapping is used. Categories without
+a configured ancestor use the default tier backed by S3 Standard.
 
 When object-category is omitted, choose a configured category and optionally add
 a descendant suffix interactively. Before uploading, review the object count,
