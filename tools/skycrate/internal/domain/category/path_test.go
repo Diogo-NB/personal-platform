@@ -12,6 +12,8 @@ func TestNormalizePath(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "hierarchy", value: " Back Ups / University Files ", want: "back-ups/university-files"},
+		{name: "underscores remain supported", value: "Back_Up/Old_Files", want: "back_up/old_files"},
+		{name: "accents remain unsupported", value: "Relatórios", wantErr: true},
 		{name: "leading slash", value: "/backups", wantErr: true},
 		{name: "trailing slash", value: "backups/", wantErr: true},
 		{name: "empty segment", value: "backups//university", wantErr: true},

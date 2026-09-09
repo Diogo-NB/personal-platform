@@ -74,7 +74,7 @@ func TestLiftDirectoryRecursively(t *testing.T) {
 func TestLiftWithExplicitCategory(t *testing.T) {
 	t.Parallel()
 
-	filePath := filepath.Join(t.TempDir(), "My Report.PDF")
+	filePath := filepath.Join(t.TempDir(), "Relatório_Final #2.PDF")
 	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestLiftWithExplicitCategory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute lift: %v", err)
 	}
-	const want = "Lifted: s3://test-bucket/backups/university/thesis/my-report.pdf\n"
+	const want = "Lifted: s3://test-bucket/backups/university/thesis/relatorio-final-2.pdf\n"
 	if stdout != want || stderr != "" {
 		t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, want)
 	}

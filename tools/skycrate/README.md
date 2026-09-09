@@ -116,10 +116,9 @@ the resolution behavior is:
 Matching follows complete path segments. A mapping for `backup` does not match
 `backup-old`; without another matching ancestor, `backup-old` uses `default`.
 
-Category segments and filenames are trimmed, lowercased, and converted to a
-conservative ASCII slug. Whitespace runs become `-`; letters, numbers, `.`, `_`,
-and `-` are accepted. Leading, trailing, and repeated category slashes are
-rejected.
+Category segments are trimmed, lowercased, and converted to a conservative
+ASCII slug. Whitespace runs become `-`; letters, numbers, `.`, `_`, and `-` are
+accepted. Leading, trailing, and repeated category slashes are rejected.
 
 ## Lift objects
 
@@ -130,8 +129,8 @@ skycrate lift <source-path> [object-category]
 With an explicit category:
 
 ```console
-$ skycrate lift --yes "./My Thesis.PDF" backup/university/coursework
-Lifted: s3://skycrate-storage/backup/university/coursework/my-thesis.pdf
+$ skycrate lift --yes "./Relatório_Final #2.PDF" backup/university/coursework
+Lifted: s3://skycrate-storage/backup/university/coursework/relatorio-final-2.pdf
 ```
 
 With a directory:
@@ -148,6 +147,13 @@ directory itself is not added to the object key. Each path relative to that
 directory is preserved and normalized, so
 `./Research Notes/Drafts/Outline.md` becomes
 `documents/drafts/outline.md` in the example above.
+
+Lifted filenames and nested directory segments are trimmed and lowercased.
+Common Portuguese accents are converted to their ASCII counterparts, such as
+`á` to `a`, `ç` to `c`, and `õ` to `o`. Whitespace, underscores, punctuation,
+symbols, and other unsupported characters become `-`; consecutive separators
+collapse into one and separator hyphens are removed from segment edges. ASCII
+letters, numbers, periods, and hyphens are preserved.
 
 The category can be an unconfigured descendant when one of its ancestors is
 configured. A category with no configured ancestor uses the `default` tier and

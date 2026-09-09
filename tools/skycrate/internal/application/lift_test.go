@@ -47,7 +47,7 @@ func TestNewLiftService(t *testing.T) {
 func TestLiftServiceLift(t *testing.T) {
 	t.Parallel()
 
-	filePath := filepath.Join(t.TempDir(), "My Report.PDF")
+	filePath := filepath.Join(t.TempDir(), "Relatório_Final #2.PDF")
 	if err := os.WriteFile(filePath, []byte("hello"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestLiftServiceLift(t *testing.T) {
 	if repository.saved[0].SourcePath != filePath {
 		t.Errorf("Save() source path = %q, want %q", repository.saved[0].SourcePath, filePath)
 	}
-	if got[0].Path != "backup/university/thesis/my-report.pdf" || got[0].Tier != storage.TierArchive {
+	if got[0].Path != "backup/university/thesis/relatorio-final-2.pdf" || got[0].Tier != storage.TierArchive {
 		t.Errorf("Lift() = %#v", got[0])
 	}
 	if got[0].Size != 5 || !got[0].CreatedAt.Equal(now.UTC()) || !got[0].UpdatedAt.Equal(now.UTC()) {
@@ -395,8 +395,8 @@ func TestLiftServiceRejectsNormalizedPathConflicts(t *testing.T) {
 	t.Parallel()
 
 	directory := t.TempDir()
-	writeLiftFixture(t, filepath.Join(directory, "My File.txt"), "one")
-	writeLiftFixture(t, filepath.Join(directory, "my-file.txt"), "two")
+	writeLiftFixture(t, filepath.Join(directory, "Ação_Final.txt"), "one")
+	writeLiftFixture(t, filepath.Join(directory, "acao-final.txt"), "two")
 
 	repository := &stubRepository{}
 	service, err := NewLiftService(repository, newTestCatalog(t), time.Now)
