@@ -124,26 +124,12 @@ func (r *Repository) Save(ctx context.Context, request out.SaveRequest) (saveErr
 
 func (r *Repository) FindMany(
 	ctx context.Context,
-	request out.FindManyRequest,
 ) ([]object.Object, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("find objects in bucket %q: %w", r.bucket, err)
 	}
 
-	categoryFilter, err := normalizeOptionalCategory(request.Category)
-	if err != nil {
-		return nil, fmt.Errorf("filter objects by category: %w", err)
-	}
-	if request.Tier != storage.TierUnknown {
-		if err := request.Tier.Validate(); err != nil {
-			return nil, fmt.Errorf("filter objects by tier: %w", err)
-		}
-	}
-
 	input := &awss3.ListObjectsV2Input{Bucket: aws.String(r.bucket)}
-	if categoryFilter != "" {
-		input.Prefix = aws.String(categoryFilter + "/")
-	}
 	paginator := awss3.NewListObjectsV2Paginator(r.client, input)
 	objects := []object.Object{}
 	for paginator.HasMorePages() {
@@ -157,10 +143,7 @@ func (r *Repository) FindMany(
 			if err != nil {
 				return nil, err
 			}
-			if !isManaged || !categoryMatches(storedObject.Category, categoryFilter) {
-				continue
-			}
-			if request.Tier != storage.TierUnknown && storedObject.Tier != request.Tier {
+			if !isManaged {
 				continue
 			}
 			objects = append(objects, storedObject)

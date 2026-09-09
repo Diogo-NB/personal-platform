@@ -12,11 +12,10 @@ import (
 )
 
 type stubRepository struct {
-	saved       []out.SaveRequest
-	findRequest out.FindManyRequest
-	objects     []object.Object
-	saveErr     error
-	findErr     error
+	saved   []out.SaveRequest
+	objects []object.Object
+	saveErr error
+	findErr error
 }
 
 func (r *stubRepository) Save(_ context.Context, request out.SaveRequest) error {
@@ -24,11 +23,7 @@ func (r *stubRepository) Save(_ context.Context, request out.SaveRequest) error 
 	return r.saveErr
 }
 
-func (r *stubRepository) FindMany(
-	_ context.Context,
-	request out.FindManyRequest,
-) ([]object.Object, error) {
-	r.findRequest = request
+func (r *stubRepository) FindMany(_ context.Context) ([]object.Object, error) {
 	return append([]object.Object{}, r.objects...), r.findErr
 }
 
@@ -45,14 +40,14 @@ func newTestCatalog(t *testing.T) *category.Catalog {
 	return catalog
 }
 
-func newTestObject(t *testing.T, name string, size int64) object.Object {
+func newTestObject(t *testing.T, name string, size int64, tier storage.Tier) object.Object {
 	t.Helper()
 
 	storedObject, err := object.New(object.NewParams{
 		RelativePath: name,
 		Category:     "backup",
 		Size:         size,
-		Tier:         storage.TierCold,
+		Tier:         tier,
 		Timestamp:    time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {

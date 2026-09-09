@@ -35,7 +35,7 @@ It uses one configured bucket, resolves each category to a semantic storage
 tier, uploads files to Amazon S3, and summarizes stored objects. Directory lifts
 are validated and traversed recursively before uploading begins.`,
 		Example: `  skycrate --config ./skycrate.yaml lift ./report.pdf documents
-	  skycrate --config ./skycrate.yaml list --category backup`,
+	  skycrate --config ./skycrate.yaml list`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {

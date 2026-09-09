@@ -1,17 +1,23 @@
 package in
 
-import "context"
+import (
+	"context"
 
-type ListRequest struct {
-	Category string
-	Tier     string
+	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
+)
+
+type TierSummary struct {
+	Tier        storage.Tier
+	ObjectCount int
+	TotalBytes  int64
 }
 
-type Summary struct {
+type ListSummary struct {
+	Tiers       []TierSummary
 	ObjectCount int
 	TotalBytes  int64
 }
 
 type Lister interface {
-	List(ctx context.Context, request ListRequest) (Summary, error)
+	List(ctx context.Context) (ListSummary, error)
 }

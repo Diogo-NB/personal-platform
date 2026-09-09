@@ -18,75 +18,65 @@ func TestListCommandHelp(t *testing.T) {
 		t.Fatalf("execute list help: %v", err)
 	}
 	for _, expected := range []string{
-		"category subtree",
-		"Multiple filters use AND",
+		"every tier's object count",
+		"overall totals",
 		"decimal gigabytes",
-		"--category string",
-		"--tier string",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Errorf("help does not contain %q:\n%s", expected, output)
 		}
 	}
-	if strings.Contains(output.String(), "--s3-tier") {
-		t.Errorf("help contains removed --s3-tier flag:\n%s", output)
+	for _, removedFlag := range []string{"--category", "--tier", "--s3-tier"} {
+		if strings.Contains(output.String(), removedFlag) {
+			t.Errorf("help contains removed %s flag:\n%s", removedFlag, output)
+		}
 	}
 }
 
 func TestList(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{name: "all", want: "Objects: 3\nTotal size: 10.000 GB\n"},
-		{name: "category", args: []string{"--category", "BACKUPS"}, want: "Objects: 1\nTotal size: 7.000 GB\n"},
-		{name: "tier", args: []string{"--tier", "cold"}, want: "Objects: 1\nTotal size: 2.000 GB\n"},
-		{name: "combined", args: []string{"--category", "documents", "--tier", "INSTANT"}, want: "Objects: 1\nTotal size: 1.000 GB\n"},
-		{name: "no matches", args: []string{"--category", "backups/university"}, want: "Objects: 0\nTotal size: 0.000 GB\n"},
-		{name: "unconfigured category", args: []string{"--category", "test"}, want: "Objects: 0\nTotal size: 0.000 GB\n"},
-		{name: "default tier", args: []string{"--tier", "DEFAULT"}, want: "Objects: 0\nTotal size: 0.000 GB\n"},
+	stdout, stderr, err := executeCommand(t, writeCommandConfig(t), nil, "list")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			args := append([]string{"list"}, test.args...)
-			stdout, stderr, err := executeCommand(t, writeCommandConfig(t), nil, args...)
-			if err != nil {
-				t.Fatalf("Execute() error: %v", err)
-			}
-			if stdout != test.want || stderr != "" {
-				t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, test.want)
-			}
-		})
+	want := "TIER     OBJECTS  SIZE (GB)\n" +
+		"default        0      0.000\n" +
+		"archive        1      7.000\n" +
+		"cold           1      2.000\n" +
+		"instant        1      1.000\n" +
+		"TOTAL          3     10.000\n"
+	if stdout != want || stderr != "" {
+		t.Errorf("output = (%q, %q), want (%q, empty)", stdout, stderr, want)
 	}
 }
 
-func TestListRejectsInvalidFilters(t *testing.T) {
+func TestListRejectsRemovedFilters(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
-		args []string
-		want string
+		flag string
 	}{
-		{name: "blank category", args: []string{"--category", " "}, want: "category filter must not be empty"},
-		{name: "blank tier", args: []string{"--tier", " "}, want: "tier filter must not be empty"},
-		{name: "invalid tier", args: []string{"--tier", "GLACIER"}, want: "is invalid"},
-		{name: "tier whitespace", args: []string{"--tier", " archive "}, want: "surrounding whitespace"},
-		{name: "removed tier flag", args: []string{"--s3-tier", "archive"}, want: "unknown flag: --s3-tier"},
+		{name: "category", flag: "--category"},
+		{name: "tier", flag: "--tier"},
+		{name: "legacy S3 tier", flag: "--s3-tier"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			args := append([]string{"list"}, test.args...)
-			stdout, stderr, err := executeCommand(t, writeCommandConfig(t), nil, args...)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Execute() error = %v, want %q", err, test.want)
+			stdout, stderr, err := executeCommand(
+				t,
+				writeCommandConfig(t),
+				nil,
+				"list",
+				test.flag,
+				"archive",
+			)
+			want := "unknown flag: " + test.flag
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Execute() error = %v, want %q", err, want)
 			}
 			if stdout != "" || stderr != "" {
 				t.Errorf("output = (%q, %q), want empty", stdout, stderr)

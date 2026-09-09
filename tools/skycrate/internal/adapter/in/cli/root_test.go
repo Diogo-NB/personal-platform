@@ -36,7 +36,7 @@ func TestRootCommandHelp(t *testing.T) {
 		"hierarchical object categories",
 		"uploads files to Amazon S3",
 		"lift        Store a local file or directory in Amazon S3 by object category",
-		"list        Summarize stored S3 object count and size",
+		"list        Summarize stored S3 objects by storage tier",
 		"--config string",
 	} {
 		if !strings.Contains(stdout.String(), expected) {
@@ -110,7 +110,7 @@ func loadTestDependencies(_ context.Context, configPath string) (Dependencies, e
 	if err != nil {
 		return Dependencies{}, err
 	}
-	lister, err := application.NewListService(repository, catalog)
+	lister, err := application.NewListService(repository)
 	if err != nil {
 		return Dependencies{}, err
 	}
@@ -130,23 +130,8 @@ func (r *testRepository) Save(_ context.Context, _ out.SaveRequest) error {
 	return nil
 }
 
-func (r *testRepository) FindMany(
-	_ context.Context,
-	request out.FindManyRequest,
-) ([]object.Object, error) {
-	objects := make([]object.Object, 0, len(r.objects))
-	for _, storedObject := range r.objects {
-		if request.Category != "" &&
-			storedObject.Category != request.Category &&
-			!strings.HasPrefix(storedObject.Category, request.Category+"/") {
-			continue
-		}
-		if request.Tier != storage.TierUnknown && storedObject.Tier != request.Tier {
-			continue
-		}
-		objects = append(objects, storedObject)
-	}
-	return objects, nil
+func (r *testRepository) FindMany(_ context.Context) ([]object.Object, error) {
+	return append([]object.Object{}, r.objects...), nil
 }
 
 func testObjects() []object.Object {

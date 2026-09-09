@@ -1,25 +1,23 @@
 package application
 
 import (
+	"context"
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/object"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/domain/storage"
 	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/in"
-	"github.com/Diogo-NB/personal-platform/tools/skycrate/internal/port/out"
 )
 
 func TestNewListService(t *testing.T) {
 	t.Parallel()
 
-	if _, err := NewListService(nil, newTestCatalog(t)); err == nil {
+	if _, err := NewListService(nil); err == nil {
 		t.Fatal("NewListService(nil) error = nil")
-	}
-	if _, err := NewListService(&stubRepository{}, nil); err == nil {
-		t.Fatal("NewListService(nil catalog) error = nil")
 	}
 }
 
@@ -27,59 +25,73 @@ func TestListServiceList(t *testing.T) {
 	t.Parallel()
 
 	repository := &stubRepository{objects: []object.Object{
-		newTestObject(t, "first.txt", 1_000_000_000),
-		newTestObject(t, "second.txt", 2_000_000_000),
+		newTestObject(t, "default.txt", 1_000_000_000, storage.TierDefault),
+		newTestObject(t, "archive.txt", 2_000_000_000, storage.TierArchive),
+		newTestObject(t, "cold.txt", 3_000_000_000, storage.TierCold),
+		newTestObject(t, "instant.txt", 4_000_000_000, storage.TierInstant),
 	}}
-	service, err := NewListService(repository, newTestCatalog(t))
+	service, err := NewListService(repository)
 	if err != nil {
 		t.Fatalf("NewListService() error: %v", err)
 	}
 
-	got, err := service.List(t.Context(), in.ListRequest{
-		Category: " BACKUP / University ",
-		Tier:     "ARCHIVE",
-	})
+	got, err := service.List(t.Context())
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	wantRequest := out.FindManyRequest{Category: "backup/university", Tier: storage.TierArchive}
-	if repository.findRequest != wantRequest {
-		t.Errorf("FindMany() request = %#v, want %#v", repository.findRequest, wantRequest)
+	want := in.ListSummary{
+		Tiers: []in.TierSummary{
+			{Tier: storage.TierDefault, ObjectCount: 1, TotalBytes: 1_000_000_000},
+			{Tier: storage.TierArchive, ObjectCount: 1, TotalBytes: 2_000_000_000},
+			{Tier: storage.TierCold, ObjectCount: 1, TotalBytes: 3_000_000_000},
+			{Tier: storage.TierInstant, ObjectCount: 1, TotalBytes: 4_000_000_000},
+		},
+		ObjectCount: 4,
+		TotalBytes:  10_000_000_000,
 	}
-	if got.ObjectCount != 2 || got.TotalBytes != 3_000_000_000 {
-		t.Errorf("List() = %#v", got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("List() = %#v, want %#v", got, want)
 	}
 }
 
-func TestListServiceAllowsUnconfiguredCategoryAndDefaultTier(t *testing.T) {
+func TestListServiceIncludesEmptyTiers(t *testing.T) {
 	t.Parallel()
 
 	repository := &stubRepository{}
-	service, err := NewListService(repository, newTestCatalog(t))
+	service, err := NewListService(repository)
 	if err != nil {
 		t.Fatalf("NewListService() error: %v", err)
 	}
 
-	_, err = service.List(t.Context(), in.ListRequest{Category: "Test", Tier: "DEFAULT"})
+	got, err := service.List(t.Context())
 	if err != nil {
 		t.Fatalf("List() error: %v", err)
 	}
-	wantRequest := out.FindManyRequest{Category: "test", Tier: storage.TierDefault}
-	if repository.findRequest != wantRequest {
-		t.Errorf("FindMany() request = %#v, want %#v", repository.findRequest, wantRequest)
+	want := in.ListSummary{
+		Tiers: []in.TierSummary{
+			{Tier: storage.TierDefault},
+			{Tier: storage.TierArchive},
+			{Tier: storage.TierCold},
+			{Tier: storage.TierInstant},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("List() = %#v, want %#v", got, want)
 	}
 }
 
-func TestListServiceRejectsTierWhitespace(t *testing.T) {
+func TestListServiceRejectsInvalidObjectTier(t *testing.T) {
 	t.Parallel()
 
-	repository := &stubRepository{}
-	service, err := NewListService(repository, newTestCatalog(t))
+	storedObject := newTestObject(t, "invalid.txt", 1, storage.TierCold)
+	storedObject.Tier = storage.TierUnknown
+	repository := &stubRepository{objects: []object.Object{storedObject}}
+	service, err := NewListService(repository)
 	if err != nil {
 		t.Fatalf("NewListService() error: %v", err)
 	}
-	if _, err := service.List(t.Context(), in.ListRequest{Tier: " archive "}); err == nil {
-		t.Fatal("List() error = nil, want tier validation error")
+	if _, err := service.List(t.Context()); err == nil || !strings.Contains(err.Error(), "storage tier") {
+		t.Fatalf("List() error = %v, want invalid tier error", err)
 	}
 }
 
@@ -87,13 +99,29 @@ func TestListServicePropagatesRepositoryError(t *testing.T) {
 	t.Parallel()
 
 	repository := &stubRepository{findErr: errors.New("find failed")}
-	service, err := NewListService(repository, newTestCatalog(t))
+	service, err := NewListService(repository)
 	if err != nil {
 		t.Fatalf("NewListService() error: %v", err)
 	}
-	_, err = service.List(t.Context(), in.ListRequest{})
+	_, err = service.List(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "find objects: find failed") {
 		t.Fatalf("List() error = %v, want wrapped repository error", err)
+	}
+}
+
+func TestListServicePropagatesCancellation(t *testing.T) {
+	t.Parallel()
+
+	service, err := NewListService(&stubRepository{})
+	if err != nil {
+		t.Fatalf("NewListService() error: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err = service.List(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("List() error = %v, want context canceled", err)
 	}
 }
 
@@ -101,14 +129,14 @@ func TestListServiceRejectsTotalOverflow(t *testing.T) {
 	t.Parallel()
 
 	repository := &stubRepository{objects: []object.Object{
-		newTestObject(t, "first.txt", math.MaxInt64),
-		newTestObject(t, "second.txt", 1),
+		newTestObject(t, "first.txt", math.MaxInt64, storage.TierCold),
+		newTestObject(t, "second.txt", 1, storage.TierArchive),
 	}}
-	service, err := NewListService(repository, newTestCatalog(t))
+	service, err := NewListService(repository)
 	if err != nil {
 		t.Fatalf("NewListService() error: %v", err)
 	}
-	if _, err := service.List(t.Context(), in.ListRequest{}); err == nil {
+	if _, err := service.List(t.Context()); err == nil {
 		t.Fatal("List() error = nil, want overflow error")
 	}
 }

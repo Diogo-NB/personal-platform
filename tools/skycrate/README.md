@@ -207,20 +207,19 @@ changed between traversal and upload.
 
 ```console
 skycrate list
-skycrate list --category backup
-skycrate list --tier archive
-skycrate list --category backup --tier archive
-skycrate list --tier default
 ```
 
-Filters are case-insensitive and combine with AND semantics. A category filter
-matches the exact category and all descendants on segment boundaries.
-
-Output uses decimal gigabytes:
+Output groups all Skycrate-managed objects by semantic storage tier. Every tier
+is shown even when it contains no objects, followed by an overall total. Sizes
+use decimal gigabytes:
 
 ```text
-Objects: 3
-Total size: 10.000 GB
+TIER     OBJECTS  SIZE (GB)
+default        0      0.000
+archive        1      7.000
+cold           1      2.000
+instant        1      1.000
+TOTAL          3     10.000
 ```
 
 Listing is paginated and uses object metadata to distinguish Skycrate-managed
@@ -260,7 +259,7 @@ directory traversal, requests approval through a function supplied by the
 driving adapter, and returns a result that distinguishes cancellation from a
 completed upload. Both services depend on the combined `ObjectRepository`
 output port, which exposes `Save(context.Context, SaveRequest) error` and
-`FindMany(context.Context, FindManyRequest) ([]object.Object, error)`.
+`FindMany(context.Context) ([]object.Object, error)`.
 
 The CLI adapter knows only the input ports and domain category catalog. Root
 `main.go` is the manual composition root: it loads configuration, constructs the

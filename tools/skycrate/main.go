@@ -51,7 +51,7 @@ func loadDependencies(ctx context.Context, configPath string) (cli.Dependencies,
 	if err != nil {
 		return cli.Dependencies{}, fmt.Errorf("create lift service: %w", err)
 	}
-	lister, err := application.NewListService(repository, catalog)
+	lister, err := application.NewListService(repository)
 	if err != nil {
 		return cli.Dependencies{}, fmt.Errorf("create list service: %w", err)
 	}
