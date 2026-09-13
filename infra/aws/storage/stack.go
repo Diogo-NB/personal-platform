@@ -1,7 +1,8 @@
-package main
+// Package storage provisions the long-term personal backup bucket.
+package storage
 
 import (
-	"os"
+	"aws/internal/costtags"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awss3"
@@ -13,6 +14,7 @@ type BackupStackProps struct {
 	awscdk.StackProps
 }
 
+// NewBackupStack creates the retained personal backup S3 bucket.
 func NewBackupStack(
 	scope constructs.Construct,
 	id string,
@@ -24,11 +26,17 @@ func NewBackupStack(
 		stackProps = props.StackProps
 	}
 
+	stackProps.Description = jsii.String(
+		"Long-term personal backup infrastructure",
+	)
+	stackProps.Tags = costtags.Merge(stackProps.Tags, costtags.ApplicationSkycrate)
+
 	stack := awscdk.NewStack(
 		scope,
 		jsii.String(id),
 		&stackProps,
 	)
+	costtags.Apply(stack, costtags.ApplicationSkycrate)
 
 	bucket := awss3.NewBucket(
 		stack,
@@ -112,28 +120,4 @@ func NewBackupStack(
 	)
 
 	return stack
-}
-
-func main() {
-	defer jsii.Close()
-
-	app := awscdk.NewApp(nil)
-
-	NewBackupStack(
-		app,
-		"PersonalPlatformStorageStack",
-		&BackupStackProps{
-			StackProps: awscdk.StackProps{
-				Env: &awscdk.Environment{
-					Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
-					Region:  jsii.String("us-east-1"),
-				},
-				Description: jsii.String(
-					"Long-term personal backup infrastructure",
-				),
-			},
-		},
-	)
-
-	app.Synth(nil)
 }

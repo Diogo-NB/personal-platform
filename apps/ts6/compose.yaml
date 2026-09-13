@@ -1,0 +1,18 @@
+services:
+  teamspeak6:
+    build:
+      context: .
+    container_name: teamspeak6
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      TSSERVER_LICENSE_ACCEPTED: accept
+    ports:
+      - "9987:9987/udp"
+      - "30033:30033/tcp"
+    volumes:
+      - teamspeak6-data:/var/tsserver
+
+volumes:
+  teamspeak6-data:
+    name: teamspeak6-data

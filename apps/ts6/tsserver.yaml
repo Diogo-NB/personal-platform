@@ -1,0 +1,25 @@
+server:
+  license-path: /var/tsserver
+  default-voice-port: 9987
+  voice-ip:
+    - 0.0.0.0
+  log-path: /var/tsserver/logs
+  filetransfer-port: 30033
+  filetransfer-ip:
+    - 0.0.0.0
+  crashdump-path: /var/tsserver/crashdumps
+
+  database:
+    plugin: sqlite3
+    sql-path: /opt/tsserver/sql/
+    sql-create-path: /opt/tsserver/sql/create_sqlite/
+    config:
+      name: teamspeak
+
+  query:
+    ssh:
+      enable: 0
+    http:
+      enable: 0
+    https:
+      enable: 0
