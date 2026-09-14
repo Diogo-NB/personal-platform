@@ -1,10 +1,12 @@
 package teamspeak6
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
@@ -155,6 +157,105 @@ func TestNewStackTemplate(t *testing.T) {
 		}
 	})
 
+	t.Run("automatic dns for the current singleton task", func(t *testing.T) {
+		template.HasResource(jsii.String("AWS::Route53::HostedZone"), map[string]any{
+			"DeletionPolicy":      "Retain",
+			"UpdateReplacePolicy": "Retain",
+			"Properties": map[string]any{
+				"Name": domainName + ".",
+			},
+		})
+		template.HasResourceProperties(jsii.String("AWS::Lambda::Function"), map[string]any{
+			"Architectures": []any{"x86_64"},
+			"Code": map[string]any{
+				"ImageUri": assertions.Match_ObjectLike(&map[string]any{
+					"Fn::Sub": assertions.Match_StringLikeRegexp(jsii.String(".*dkr\\.ecr\\..*")),
+				}),
+			},
+			"Environment": map[string]any{
+				"Variables": map[string]any{
+					"CLUSTER_ARN":    assertions.Match_AnyValue(),
+					"DNS_NAME":       dnsRecordName,
+					"DNS_TTL":        "60",
+					"HOSTED_ZONE_ID": assertions.Match_AnyValue(),
+					"SERVICE_NAME":   "teamspeak6",
+				},
+			},
+			"FunctionName":                 "personal-platform-teamspeak6-dns-updater",
+			"Handler":                      assertions.Match_Absent(),
+			"MemorySize":                   float64(128),
+			"PackageType":                  "Image",
+			"ReservedConcurrentExecutions": float64(1),
+			"Runtime":                      assertions.Match_Absent(),
+			"Timeout":                      float64(30),
+		})
+		template.HasResourceProperties(jsii.String("AWS::Lambda::EventInvokeConfig"), map[string]any{
+			"MaximumRetryAttempts": float64(2),
+		})
+		template.HasResourceProperties(jsii.String("AWS::Logs::LogGroup"), map[string]any{
+			"LogGroupName":    "/personal-platform/teamspeak6/dns-updater",
+			"RetentionInDays": float64(7),
+		})
+		template.HasResourceProperties(jsii.String("AWS::Events::Rule"), map[string]any{
+			"EventPattern": map[string]any{
+				"detail": map[string]any{
+					"clusterArn": assertions.Match_AnyValue(),
+					"group":      []any{"service:teamspeak6"},
+					"lastStatus": []any{"RUNNING"},
+				},
+				"detail-type": []any{"ECS Task State Change"},
+				"source":      []any{"aws.ecs"},
+			},
+			"Name":               "personal-platform-teamspeak6-dns-updater",
+			"ScheduleExpression": "rate(5 minutes)",
+			"State":              "ENABLED",
+			"Targets": assertions.Match_ArrayWith(&[]any{
+				assertions.Match_ObjectLike(&map[string]any{
+					"RetryPolicy": map[string]any{
+						"MaximumEventAgeInSeconds": float64(3600),
+						"MaximumRetryAttempts":     float64(10),
+					},
+				}),
+			}),
+		})
+		template.HasResourceProperties(jsii.String("AWS::IAM::Policy"), map[string]any{
+			"PolicyDocument": map[string]any{
+				"Statement": assertions.Match_ArrayWith(&[]any{
+					assertions.Match_ObjectLike(&map[string]any{
+						"Action":    "ecs:ListTasks",
+						"Condition": assertions.Match_AnyValue(),
+						"Effect":    "Allow",
+						"Resource":  "*",
+					}),
+					assertions.Match_ObjectLike(&map[string]any{
+						"Action":   "ecs:DescribeTasks",
+						"Effect":   "Allow",
+						"Resource": assertions.Match_AnyValue(),
+					}),
+					assertions.Match_ObjectLike(&map[string]any{
+						"Action":   "ec2:DescribeNetworkInterfaces",
+						"Effect":   "Allow",
+						"Resource": "*",
+					}),
+					assertions.Match_ObjectLike(&map[string]any{
+						"Action": assertions.Match_ArrayWith(&[]any{
+							"route53:ChangeResourceRecordSets",
+							"route53:ListResourceRecordSets",
+						}),
+						"Effect":   "Allow",
+						"Resource": assertions.Match_AnyValue(),
+					}),
+				}),
+				"Version": "2012-10-17",
+			},
+		})
+		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(0))
+		template.HasOutput(jsii.String("TeamSpeakAddress"), map[string]any{
+			"Value": dnsRecordName,
+		})
+		assertDistinctApplicationImageAssets(t, template)
+	})
+
 	t.Run("tags and outputs", func(t *testing.T) {
 		assertCostAllocationTags(t, template, "teamspeak6")
 
@@ -165,6 +266,9 @@ func TestNewStackTemplate(t *testing.T) {
 			"AccessPointID",
 			"SecurityGroupID",
 			"LogGroupName",
+			"HostedZoneID",
+			"NameServers",
+			"TeamSpeakAddress",
 		}
 		for _, output := range expectedOutputs {
 			template.HasOutput(jsii.String(output), map[string]any{
@@ -194,13 +298,61 @@ func TestNewStackTemplate(t *testing.T) {
 			"AWS::ElasticLoadBalancing::LoadBalancer",
 			"AWS::ElasticLoadBalancingV2::LoadBalancer",
 			"AWS::ECR::Repository",
-			"AWS::Lambda::Function",
 			"AWS::RDS::DBCluster",
 			"AWS::RDS::DBInstance",
 		} {
 			template.ResourceCountIs(jsii.String(resourceType), jsii.Number(0))
 		}
 	})
+}
+
+func TestNewStackRequiresImageAssetDirectories(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		props      *StackProps
+		panicMatch string
+	}{
+		{
+			name:       "nil props",
+			props:      nil,
+			panicMatch: "stack props are required",
+		},
+		{
+			name: "missing server image directory",
+			props: &StackProps{
+				DNSUpdaterImageAssetDirectory: "/tmp/dns-updater",
+			},
+			panicMatch: "image asset directory is required",
+		},
+		{
+			name: "missing dns updater image directory",
+			props: &StackProps{
+				ImageAssetDirectory: "/tmp/teamspeak6",
+			},
+			panicMatch: "dns updater image asset directory is required",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			defer func() {
+				value := recover()
+				if value == nil {
+					t.Fatal("NewStack() did not panic")
+				}
+				if !strings.Contains(fmt.Sprint(value), test.panicMatch) {
+					t.Errorf("NewStack() panic = %q, want substring %q", value, test.panicMatch)
+				}
+			}()
+
+			app := awscdk.NewApp(nil)
+			NewStack(app, "TestStack", test.props)
+		})
+	}
 }
 
 func assertCostAllocationTags(
@@ -221,8 +373,11 @@ func assertCostAllocationTags(
 		"AWS::ECS::TaskDefinition":  "Tags",
 		"AWS::EFS::AccessPoint":     "AccessPointTags",
 		"AWS::EFS::FileSystem":      "FileSystemTags",
+		"AWS::Events::Rule":         "Tags",
 		"AWS::IAM::Role":            "Tags",
+		"AWS::Lambda::Function":     "Tags",
 		"AWS::Logs::LogGroup":       "Tags",
+		"AWS::Route53::HostedZone":  "HostedZoneTags",
 	}
 	expected := map[string]string{
 		"Application": application,
@@ -312,10 +467,64 @@ func newTemplate(t *testing.T) assertions.Template {
 				Region:  jsii.String("sa-east-1"),
 			},
 		},
-		ImageAssetDirectory: imageAssetDirectory(t),
+		ImageAssetDirectory:           imageAssetDirectory(t),
+		DNSUpdaterImageAssetDirectory: dnsUpdaterImageAssetDirectory(t),
 	})
 
 	return assertions.Template_FromStack(stack, nil)
+}
+
+func dnsUpdaterImageAssetDirectory(t *testing.T) string {
+	t.Helper()
+
+	directory, err := filepath.Abs(
+		filepath.Join("..", "..", "..", "apps", "dns-updater"),
+	)
+	if err != nil {
+		t.Fatalf("resolve dns updater image asset directory: %v", err)
+	}
+
+	return directory
+}
+
+func assertDistinctApplicationImageAssets(t *testing.T, template assertions.Template) {
+	t.Helper()
+
+	resources, ok := (*template.ToJSON())["Resources"].(map[string]any)
+	if !ok {
+		t.Fatal("template Resources is not an object")
+	}
+
+	var serverImage any
+	var updaterImage any
+	for _, resourceValue := range resources {
+		resource, ok := resourceValue.(map[string]any)
+		if !ok {
+			continue
+		}
+		properties, _ := resource["Properties"].(map[string]any)
+		switch resource["Type"] {
+		case "AWS::ECS::TaskDefinition":
+			containers, _ := properties["ContainerDefinitions"].([]any)
+			if len(containers) == 1 {
+				container, _ := containers[0].(map[string]any)
+				serverImage = container["Image"]
+			}
+		case "AWS::Lambda::Function":
+			code, _ := properties["Code"].(map[string]any)
+			updaterImage = code["ImageUri"]
+			if _, hasInlineCode := code["ZipFile"]; hasInlineCode {
+				t.Error("lambda code contains an inline ZipFile")
+			}
+		}
+	}
+
+	if serverImage == nil || updaterImage == nil {
+		t.Fatalf("image assets = server %#v, updater %#v", serverImage, updaterImage)
+	}
+	if reflect.DeepEqual(serverImage, updaterImage) {
+		t.Errorf("server and updater unexpectedly use the same image asset: %#v", serverImage)
+	}
 }
 
 func imageAssetDirectory(t *testing.T) string {

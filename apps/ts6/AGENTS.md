@@ -24,8 +24,11 @@ runbook. The CDK implementation is in `../../infra/aws/teamspeak6`.
   protection.
 - Use a `10.42.0.0/24` VPC with one public `/26` subnet in `sa-east-1a`, an
   Internet Gateway, and no NAT Gateway.
-- Give each running task a dynamic public IPv4. Do not add an Elastic IP, load
-  balancer, or DNS without a new approved decision.
+- Give each running task a dynamic public IPv4 and publish it as
+  `ts.diogo-nb.com.br`. Do not add an Elastic IP or load balancer.
+- Host `diogo-nb.com.br` in a retained Route 53 public hosted zone. Keep the
+  `A` record synchronized through the scoped ECS/EventBridge/Lambda updater;
+  do not manage the record manually.
 - Admit only public `9987/UDP` and `30033/TCP`. Do not expose SSH, ECS Exec, or
   TeamSpeak query ports.
 - Send container logs to `/personal-platform/teamspeak6` with seven-day
@@ -76,12 +79,16 @@ investigating persistent state.
 
 - Inspect the worktree and preserve unrelated changes.
 - Keep reusable examples free of account IDs, credentials, real public
-  addresses, resource IDs, and domains.
+  addresses, and resource IDs. The committed `diogo-nb.com.br` application
+  domain is the only allowed real domain.
 - Re-check official TeamSpeak notes, image tags, configuration, and license
   before any upgrade.
 - Re-check official AWS prices and date the cost model when relevant inputs
   change.
-- Keep the Docker build context limited to `Dockerfile` and `tsserver.yaml`.
+- Keep the TeamSpeak Docker build context limited to `Dockerfile` and
+  `tsserver.yaml`.
+- Keep the DNS updater in the separate `../dns-updater/` application and Docker
+  context so its changes cannot alter the TeamSpeak image asset hash.
 - Validate Compose and build the image explicitly for `linux/amd64` when Docker
   is available.
 - Update `README.md` whenever architecture, ports, scaling, persistence,
@@ -99,6 +106,17 @@ cdk synth PersonalPlatformStorageStack --no-lookups
 cdk synth PersonalPlatformTeamspeak6Stack --no-lookups
 ```
 
+For DNS updater changes, also run from `apps/dns-updater`:
+
+```bash
+go mod verify
+go test -race ./...
+go vet ./...
+go build ./...
+govulncheck ./...
+docker build --platform linux/amd64 .
+```
+
 When Docker is available, also run from `apps/ts6`:
 
 ```bash
@@ -109,5 +127,5 @@ docker build --platform linux/amd64 .
 Template tests must cover automatic license acceptance, image asset, Fargate
 runtime and sizing, public IP, allowed ingress, encrypted retained EFS,
 access-point identity, TLS/IAM mount, stop-before-start deployment, rollback,
-stop timeout, tags, outputs, and absence of EC2 instances, EBS, NAT, load
-balancers, RDS, SSH, and query ingress.
+stop timeout, automatic Route 53 updates, tags, outputs, and absence of EC2
+instances, EBS, NAT, load balancers, RDS, SSH, and query ingress.

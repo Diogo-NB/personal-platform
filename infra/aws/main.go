@@ -32,6 +32,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	dnsUpdaterImageAssetDirectory, err := filepath.Abs(
+		filepath.Join("..", "..", "apps", "dns-updater"),
+	)
+	if err != nil {
+		panic(err)
+	}
 	teamspeak6.NewStack(
 		app,
 		"PersonalPlatformTeamspeak6Stack",
@@ -41,7 +47,8 @@ func main() {
 					Region: jsii.String("sa-east-1"),
 				},
 			},
-			ImageAssetDirectory: imageAssetDirectory,
+			ImageAssetDirectory:           imageAssetDirectory,
+			DNSUpdaterImageAssetDirectory: dnsUpdaterImageAssetDirectory,
 		},
 	)
 

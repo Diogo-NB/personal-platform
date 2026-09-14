@@ -6,3 +6,5 @@
   `tools/skycrate/AGENTS.md`.
 - Before reviewing or modifying anything under `apps/ts6/` or
   `infra/aws/teamspeak6/`, read and follow `apps/ts6/AGENTS.md`.
+- Before reviewing or modifying anything under `apps/dns-updater/`, read and
+  follow `apps/dns-updater/AGENTS.md`.

@@ -8,13 +8,15 @@ ECS Fargate task, and retained EFS One Zone storage.
 
 The `production` tag identifies a long-lived personal environment. This design
 does not provide production-grade availability or recoverability: it has one
-Availability Zone, no stable public address, no backup, and no database
-replica.
+Availability Zone, a stable DNS name backed by a changing public address, no
+backup, and no database replica.
 
 ## Architecture
 
 ```text
 Internet
+  |
+  |  ts.diogo-nb.com.br (Route 53, TTL 60 seconds)
   |
   |-- 9987/UDP (voice) -----------+
   `-- 30033/TCP (file transfer) --+--> public Fargate task
@@ -25,6 +27,10 @@ Internet
                                               v
                                       encrypted EFS One Zone
                                       /var/tsserver
+
+ECS RUNNING events --+
+                      +--> Lambda DNS updater --> Route 53 A record
+5-minute schedule ----+
 ```
 
 The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
@@ -39,19 +45,23 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   `9987`, mounted read-write at `/var/tsserver` with TLS and IAM authorization.
 - A CloudWatch log group named `/personal-platform/teamspeak6` with seven-day
   retention.
+- A retained Route 53 public hosted zone for `diogo-nb.com.br`, an EventBridge
+  rule, and a small Go Lambda container that keeps `ts.diogo-nb.com.br` pointed
+  at the current running task.
 
 Every taggable resource uses `Project=personal-storage`,
 `Application=teamspeak6`, and `Environment=production`. The ECS service
 propagates these tags to each Fargate task so compute can be grouped by
 application in AWS billing reports.
 
-There is no load balancer, DNS, Elastic IP, NAT Gateway, ECS Exec, SSH, RDS,
-external MariaDB, or public query interface. The security group admits only
-`9987/UDP` and `30033/TCP` from IPv4 clients. Query SSH (`10022`), HTTP
-(`10080`), and HTTPS (`10443`) are disabled in `tsserver.yaml` and have no
-ingress rules.
+There is no load balancer, Elastic IP, NAT Gateway, ECS Exec, SSH, RDS,
+external MariaDB, or public query interface. DNS changes only how clients find
+the task; it does not proxy traffic or make the public IPv4 static. The
+security group admits only `9987/UDP` and `30033/TCP` from IPv4 clients. Query
+SSH (`10022`), HTTP (`10080`), and HTTPS (`10443`) are disabled in
+`tsserver.yaml` and have no ingress rules.
 
-## Application image and local use
+## Application images and local use
 
 `Dockerfile` extends the pinned upstream image and copies the committed
 `tsserver.yaml` to `/opt/teamspeak6-config`. Keeping the configuration outside
@@ -83,6 +93,30 @@ docker compose down
 
 Never run `docker compose down -v` unless permanent deletion of local
 TeamSpeak data is intended.
+
+The DNS updater is the independent, reusable Go 1.27.1 application and Docker
+asset under [`../dns-updater`](../dns-updater/README.md). Its multi-stage build
+produces a static Linux/x86-64
+`bootstrap` executable with the `lambda.norpc` build tag and runs it on the
+official AWS Lambda `provided.al2023` base image. Its build context is separate
+from the TeamSpeak server context, so updater source or dependency changes do
+not replace the ECS task. The current Lambda deployment is configured for
+TeamSpeak; future ECS services can deploy the same image with their own scoped
+environment, EventBridge filter, and IAM permissions.
+
+The updater reads `CLUSTER_ARN`, `SERVICE_NAME`, `HOSTED_ZONE_ID`, `DNS_NAME`,
+and `DNS_TTL` from the Lambda environment. CDK supplies all five values. To
+validate the module and its image locally:
+
+```bash
+cd apps/dns-updater
+go mod verify
+go test -race ./...
+go vet ./...
+go build ./...
+govulncheck ./... # when installed
+docker build --platform linux/amd64 .
+```
 
 ## Persistence and deployment safety
 
@@ -164,49 +198,52 @@ After explicit approval, the user deploys:
 cdk deploy PersonalPlatformTeamspeak6Stack
 ```
 
-The Docker asset is built locally for `linux/amd64` and published through the
-CDK bootstrap ECR asset repository. The application does not create a separate
-named ECR repository.
+Both Docker assets are built locally for `linux/amd64` and published through
+the CDK bootstrap ECR asset repository. The application does not create a
+separate named ECR repository.
 
-## Retrieve the current address
+## DNS setup and automatic updates
 
-The public IPv4 belongs to the current Fargate task and changes after task
-replacement or a scale-to-zero/start cycle. It is deliberately not a
-CloudFormation output. Retrieve it from the current task:
+The client address is `ts.diogo-nb.com.br`. The stack creates a Route 53 public
+hosted zone for `diogo-nb.com.br`, but Registro.br remains the domain
+registrar. Route 53 becomes authoritative only after this one-time delegation:
+
+1. Deploy the stack and copy the four values from its `NameServers` output.
+2. If the domain already has records for a website, email, or another service,
+   reproduce them in Route 53 before continuing.
+3. Registro.br enables DNSSEC automatically when its own DNS servers are in
+   use. Remove the existing DS delegation or disable DNSSEC there before moving
+   to the unsigned Route 53 zone. Leaving the old DS record can make validating
+   resolvers return `SERVFAIL`.
+4. In the Registro.br domain settings, replace its authoritative DNS servers
+   with all four Route 53 nameservers.
+5. Wait for delegation caches to expire, then verify:
 
 ```bash
-TASK_ARN=$(aws ecs list-tasks \
-  --region sa-east-1 \
-  --cluster personal-platform-teamspeak6 \
-  --service-name teamspeak6 \
-  --desired-status RUNNING \
-  --query 'taskArns[0]' \
-  --output text)
-
-ENI_ID=$(aws ecs describe-tasks \
-  --region sa-east-1 \
-  --cluster personal-platform-teamspeak6 \
-  --tasks "$TASK_ARN" \
-  --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value | [0]' \
-  --output text)
-
-aws ec2 describe-network-interfaces \
-  --region sa-east-1 \
-  --network-interface-ids "$ENI_ID" \
-  --query 'NetworkInterfaces[0].Association.PublicIp' \
-  --output text
+dig NS diogo-nb.com.br +short
+dig A ts.diogo-nb.com.br +short
 ```
 
-Do not cache or publish the result as a permanent endpoint. Share the current
-address only with intended users.
+Do not create or update the `A` record manually. The updater runs when the ECS
+task reaches `RUNNING` and every five minutes as reconciliation. It finds the
+singleton running task, resolves its current public IPv4, and performs a Route
+53 `UPSERT` only when the value changed. The record TTL is 60 seconds, so a
+replacement can take roughly the task startup time plus DNS-cache expiry to
+become reachable everywhere. The periodic run also creates the first record
+for a task that was already running when DNS was deployed.
+
+The hosted zone has a retain policy. Deleting the CloudFormation stack does
+not delete the zone, its DNS records, or its ongoing hosted-zone charge. If the
+zone is ever intentionally replaced, Registro.br must be delegated to the new
+four nameservers.
 
 ## First deployment acceptance
 
 After deployment, the user verifies:
 
 1. ECS reports exactly one healthy running task.
-2. The task has a public IPv4, and TeamSpeak accepts voice connections on UDP
-   9987.
+2. `ts.diogo-nb.com.br` resolves to the task's public IPv4, and TeamSpeak
+   accepts voice connections through that name on UDP 9987.
 3. File transfer works on TCP 30033 only for groups allowed by TeamSpeak
    permissions and quotas.
 4. The initial administrative privilege key is retrieved privately from
@@ -254,9 +291,10 @@ aws ecs wait services-stable \
   --services teamspeak6
 ```
 
-Retrieve and share the new public IPv4 after every start. Never scale above
-`1`. Fargate compute and public-IPv4 charges stop at desired count `0`; EFS,
-ECR image storage, and retained CloudWatch log storage continue charging.
+Keep using `ts.diogo-nb.com.br` after every start; the updater replaces the DNS
+value automatically. Never scale above `1`. Fargate compute and public-IPv4
+charges stop at desired count `0`; Route 53, EFS, ECR image storage, and
+retained CloudWatch log storage continue charging.
 
 Future start/stop Lambdas and CI/CD automation are deferred. Their service
 control contract is limited to changing desired count between `0` and `1`.
@@ -271,11 +309,12 @@ aws logs tail /personal-platform/teamspeak6 \
   --since 30m
 ```
 
-If users cannot connect, check the service desired count and running task,
-retrieve the current public IPv4, inspect stopped-task reasons and CloudWatch
-logs, then confirm the subnet route and `9987/UDP` security-group rule. For file
-transfer, also verify `30033/TCP`, TeamSpeak permissions and quotas, and free
-EFS capacity.
+If users cannot connect, check the service desired count and running task, then
+inspect stopped-task reasons and CloudWatch logs. Compare the task's public
+IPv4 with `dig A ts.diogo-nb.com.br +short`; DNS updater logs are in
+`/personal-platform/teamspeak6/dns-updater`. Also confirm the subnet route and
+`9987/UDP` security-group rule. For file transfer, verify `30033/TCP`,
+TeamSpeak permissions and quotas, and free EFS capacity.
 
 If state appears missing, scale to zero before investigation. Verify that the
 task definition mounts the expected file-system and access-point IDs at
@@ -304,7 +343,8 @@ backup strategy before an upgrade where state loss is unacceptable.
 
 ## Cost model
 
-Estimate date: 2026-09-13. Prices are public on-demand São Paulo rates before
+Estimate date: 2026-09-13. Regional services use public on-demand São Paulo
+rates; Route 53 authoritative DNS uses its global rate. Values are before
 credits, support, and tax:
 
 - Fargate Linux/x86: USD 0.0696 per vCPU-hour plus USD 0.0076 per GB-hour. The
@@ -313,10 +353,19 @@ credits, support, and tax:
 - EFS One Zone: USD 0.304 per GB-month. The estimate assumes 1 GiB average
   stored; actual storage is elastic. Bursting throughput is selected, and same-
   AZ access has no data-transfer charge.
-- Private ECR storage: USD 0.10 per GB-month. The estimate allows 0.1 GiB for
-  the current compressed image asset; old assets can increase this.
+- Private ECR storage: USD 0.10 per GB-month. The estimate allows 0.2 GiB for
+  the current compressed TeamSpeak and DNS updater image assets; old assets can
+  increase this.
 - CloudWatch Logs: USD 0.90 per GB ingested and USD 0.0408 per GB-month stored.
   The estimate allows 0.1 GiB ingested per month and seven-day retention.
+- Route 53 authoritative DNS: USD 0.50 per hosted zone per month and USD 0.40
+  per million standard queries. Four-user query volume is treated as zero at
+  this estimate's precision.
+- The EventBridge rule invokes the 128 MiB updater Lambda every five minutes
+  and on matching ECS task events. Its approximately 8,640 scheduled monthly
+  invocations fit within Lambda's monthly 1 million-request and 400,000
+  GB-second free tier if those allowances are not consumed elsewhere. Its log
+  volume is included in the CloudWatch allowance above.
 - Internet data transfer out: the first 100 GB per month is free in aggregate
   across eligible AWS services and Regions; São Paulo's first paid tier is USD
   0.15 per GB. The scenarios assume usage remains inside the shared free tier.
@@ -324,17 +373,17 @@ credits, support, and tax:
   12.15%, using `USD × 5.0918 × 1.1215`. AWS invoice conversion and taxes can
   differ.
 
-| Scenario | Fargate + IPv4 | Persistent EFS/ECR + logs | USD before tax | Estimated BRL after tax |
+| Scenario | Fargate + IPv4 | Persistent EFS/ECR + logs/DNS | USD before tax | Estimated BRL after tax |
 |---|---:|---:|---:|---:|
-| One 4-hour session in a month | 0.1200 | 0.4049 | 0.5249 | R$3.00 |
-| 4 hours/day for 30 days | 3.6000 | 0.4049 | 4.0049 | R$22.87 |
-| Continuously running for 730 hours | 21.9000 | 0.4049 | 22.3049 | R$127.37 |
+| One 4-hour session in a month | 0.1200 | 0.9149 | 1.0349 | R$5.91 |
+| 4 hours/day for 30 days | 3.6000 | 0.9149 | 4.5149 | R$25.78 |
+| Continuously running for 730 hours | 21.9000 | 0.9149 | 22.8149 | R$130.28 |
 
-The persistent subtotal is `1 GiB EFS + 0.1 GiB ECR + 0.1 GiB log ingestion +
-approximately 0.023 GiB-month retained log storage`. It is a planning example,
-not a spending cap. File transfers, larger EFS state, accumulated CDK assets,
-manual resources, and usage of the shared free egress allowance can dominate
-the bill.
+The persistent subtotal is `1 GiB EFS + 0.2 GiB ECR + 0.1 GiB log ingestion +
+approximately 0.023 GiB-month retained log storage + one Route 53 hosted
+zone`. It is a planning example, not a spending cap. File transfers, larger
+EFS state, accumulated CDK assets, manual resources, and usage of the shared
+free egress allowance can dominate the bill.
 
 Official references:
 
@@ -345,6 +394,12 @@ Official references:
 - [Amazon EFS pricing](https://aws.amazon.com/efs/pricing/)
 - [Amazon ECR pricing](https://aws.amazon.com/ecr/pricing/)
 - [Amazon CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/)
+- [Amazon Route 53 pricing](https://aws.amazon.com/route53/pricing/)
+- [Route 53 DNS service for an existing domain](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/MigratingDNS.html)
+- [Route 53 DNSSEC migration guidance](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/hosted-zones-migrating.html)
+- [Registro.br domain and DNS guidance](https://registro.br/ajuda/registro-de-novos-dominios/)
+- [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/)
+- [Amazon EventBridge pricing](https://aws.amazon.com/eventbridge/pricing/)
 - [Public IPv4 pricing](https://aws.amazon.com/vpc/pricing/)
 - [EC2 internet data-transfer pricing](https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer)
 - [AWS Brazil taxes](https://aws.amazon.com/tax-help/Brazil/)
@@ -355,7 +410,7 @@ stored data, image size, logging, or transfer assumptions change.
 
 ## Deferred work and recovery limits
 
-Deferred work includes start/stop Lambdas, CI/CD, a stable address or DNS,
+Deferred work includes start/stop Lambdas, CI/CD, Route 53 DNSSEC signing,
 backups and tested restore, monitoring alarms, and automated budget controls.
 None is implied by the current stack.
 

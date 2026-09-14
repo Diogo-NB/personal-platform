@@ -17,10 +17,14 @@ application.
 
 The TeamSpeak stack provisions a single public ECS Fargate task in
 `sa-east-1`, backed by an encrypted retained EFS One Zone file system. Its
-Docker image is built from `apps/ts6` and published as a CDK ECR asset. Read the
+Docker image is built from `apps/ts6` and published as a CDK ECR asset. A
+separate reusable Go Lambda container asset is built from `apps/dns-updater`;
+an EventBridge rule invokes the TeamSpeak-configured deployment when its ECS
+task reaches `RUNNING`, keeping `ts.diogo-nb.com.br` in the retained Route 53
+public hosted zone pointed at the current task's dynamic public IPv4. Read the
 application runbook before synthesis or operation; it includes automatic
-license acceptance, the dynamic-address workflow, the scaling contract, and
-data-recovery limits.
+license acceptance, one-time registrar delegation, DNS updates, the scaling
+contract, and data-recovery limits.
 
 ## Cost allocation tags
 
@@ -58,6 +62,13 @@ after seven days, and expired delete markers are removed.
 ## Local validation
 
 ```sh
+cd ../../apps/dns-updater
+go mod verify
+go test -race ./...
+go vet ./...
+go build ./...
+
+cd ../../infra/aws
 go test ./...
 go vet ./...
 go build ./...
