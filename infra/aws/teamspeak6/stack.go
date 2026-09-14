@@ -328,12 +328,11 @@ func newDNSUpdater(
 				"HOSTED_ZONE_ID": hostedZone.HostedZoneId(),
 				"SERVICE_NAME":   jsii.String(serviceName),
 			},
-			FunctionName:                 jsii.String("personal-platform-teamspeak6-dns-updater"),
-			LogGroup:                     logGroup,
-			MemorySize:                   jsii.Number(128),
-			ReservedConcurrentExecutions: jsii.Number(1),
-			RetryAttempts:                jsii.Number(2),
-			Timeout:                      awscdk.Duration_Seconds(jsii.Number(30)),
+			FunctionName:  jsii.String("personal-platform-teamspeak6-dns-updater"),
+			LogGroup:      logGroup,
+			MemorySize:    jsii.Number(128),
+			RetryAttempts: jsii.Number(2),
+			Timeout:       awscdk.Duration_Seconds(jsii.Number(30)),
 		},
 	)
 	updater.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{

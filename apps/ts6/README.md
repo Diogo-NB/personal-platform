@@ -105,8 +105,14 @@ TeamSpeak; future ECS services can deploy the same image with their own scoped
 environment, EventBridge filter, and IAM permissions.
 
 The updater reads `CLUSTER_ARN`, `SERVICE_NAME`, `HOSTED_ZONE_ID`, `DNS_NAME`,
-and `DNS_TTL` from the Lambda environment. CDK supplies all five values. To
-validate the module and its image locally:
+and `DNS_TTL` from the Lambda environment. CDK supplies all five values.
+
+The TeamSpeak deployment uses the account's shared regional Lambda concurrency
+instead of reserving capacity for the updater. Duplicate EventBridge deliveries
+can therefore overlap, but the updater reconciles current ECS state and uses an
+idempotent Route 53 `UPSERT`; the five-minute trigger provides eventual repair.
+
+To validate the module and its image locally:
 
 ```bash
 cd apps/dns-updater

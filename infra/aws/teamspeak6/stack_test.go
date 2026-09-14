@@ -185,7 +185,7 @@ func TestNewStackTemplate(t *testing.T) {
 			"Handler":                      assertions.Match_Absent(),
 			"MemorySize":                   float64(128),
 			"PackageType":                  "Image",
-			"ReservedConcurrentExecutions": float64(1),
+			"ReservedConcurrentExecutions": assertions.Match_Absent(),
 			"Runtime":                      assertions.Match_Absent(),
 			"Timeout":                      float64(30),
 		})
