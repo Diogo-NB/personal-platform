@@ -26,7 +26,7 @@ func TestNewStackTemplate(t *testing.T) {
 	t.Run("fargate runtime image ports and storage", func(t *testing.T) {
 		template.HasResourceProperties(jsii.String("AWS::ECS::TaskDefinition"), map[string]any{
 			"Cpu":                     "256",
-			"Memory":                  "1024",
+			"Memory":                  "512",
 			"NetworkMode":             "awsvpc",
 			"RequiresCompatibilities": []any{"FARGATE"},
 			"RuntimePlatform": map[string]any{
@@ -80,6 +80,12 @@ func TestNewStackTemplate(t *testing.T) {
 	t.Run("public singleton service stops before start and rolls back", func(t *testing.T) {
 		template.HasResourceProperties(jsii.String("AWS::ECS::Service"), map[string]any{
 			"AvailabilityZoneRebalancing": "DISABLED",
+			"CapacityProviderStrategy": []any{
+				map[string]any{
+					"CapacityProvider": "FARGATE_SPOT",
+					"Weight":           float64(1),
+				},
+			},
 			"DeploymentConfiguration": map[string]any{
 				"DeploymentCircuitBreaker": map[string]any{
 					"Enable":   true,
@@ -90,7 +96,7 @@ func TestNewStackTemplate(t *testing.T) {
 			},
 			"DesiredCount":         float64(1),
 			"EnableECSManagedTags": true,
-			"LaunchType":           "FARGATE",
+			"LaunchType":           assertions.Match_Absent(),
 			"NetworkConfiguration": map[string]any{
 				"AwsvpcConfiguration": map[string]any{
 					"AssignPublicIp": "ENABLED",

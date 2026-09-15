@@ -14,8 +14,10 @@ runbook. The CDK implementation is in `../../infra/aws/teamspeak6`.
 - Keep the storage stack in `us-east-1` unchanged.
 - Pin `teamspeaksystems/teamspeak6-server:6.0.0-beta12.1`; never use `latest`.
 - Build and run Linux/x86-64 only.
-- Use one ECS Fargate task at `0.25 vCPU / 1 GiB`, desired count `1` while
-  running and `0` while stopped.
+- Use one ECS Fargate Spot task at `0.25 vCPU / 512 MiB`, desired count `1`
+  while running and `0` while stopped. Do not add on-demand fallback capacity.
+- Accept that Spot interruptions provide approximately two minutes of warning
+  and can leave the service unavailable until Spot capacity returns.
 - Use embedded SQLite and prevent overlapping writers with ECS deployment
   limits `minimumHealthyPercent=0` and `maximumPercent=100`.
 - Persist `/var/tsserver` on encrypted EFS One Zone through an access point
@@ -125,7 +127,7 @@ docker build --platform linux/amd64 .
 ```
 
 Template tests must cover automatic license acceptance, image asset, Fargate
-runtime and sizing, public IP, allowed ingress, encrypted retained EFS,
+Spot capacity and sizing, public IP, allowed ingress, encrypted retained EFS,
 access-point identity, TLS/IAM mount, stop-before-start deployment, rollback,
 stop timeout, automatic Route 53 updates, tags, outputs, and absence of EC2
 instances, EBS, NAT, load balancers, RDS, SSH, and query ingress.

@@ -4,7 +4,7 @@ This directory is the source of truth for the personal TeamSpeak 6 Server beta
 application and its AWS deployment. The server is intended for four
 simultaneous users in AWS São Paulo (`sa-east-1`). It uses the pinned
 `teamspeaksystems/teamspeak6-server:6.0.0-beta12.1` image, embedded SQLite, one
-ECS Fargate task, and retained EFS One Zone storage.
+ECS Fargate Spot task, and retained EFS One Zone storage.
 
 The `production` tag identifies a long-lived personal environment. This design
 does not provide production-grade availability or recoverability: it has one
@@ -19,7 +19,7 @@ Internet
   |  ts.diogo-nb.com.br (Route 53, TTL 60 seconds)
   |
   |-- 9987/UDP (voice) -----------+
-  `-- 30033/TCP (file transfer) --+--> public Fargate task
+  `-- 30033/TCP (file transfer) --+--> public Fargate Spot task
                                          TeamSpeak 6 beta
                                          Linux/x86-64
                                               |
@@ -39,8 +39,8 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   Gateway, and no NAT Gateway.
 - An ECS cluster named `personal-platform-teamspeak6` and a service named
   `teamspeak6`.
-- One Linux/x86-64 Fargate task using `0.25 vCPU`, `1 GiB` of memory, and an
-  automatically assigned public IPv4 address.
+- One Linux/x86-64 Fargate Spot task using `0.25 vCPU`, `512 MiB` of memory,
+  and an automatically assigned public IPv4 address.
 - An encrypted EFS One Zone file system and an access point enforcing UID/GID
   `9987`, mounted read-write at `/var/tsserver` with TLS and IAM authorization.
 - A CloudWatch log group named `/personal-platform/teamspeak6` with seven-day
@@ -126,12 +126,19 @@ docker build --platform linux/amd64 .
 
 ## Persistence and deployment safety
 
-The ECS service starts with desired count `1`. Its deployment limits are
-`minimumHealthyPercent=0` and `maximumPercent=100`, so an update stops the old
-task before starting a replacement. The container receives a 120-second stop
-timeout, and ECS deployment rollback is enabled. These settings prevent two
-tasks from intentionally writing the same SQLite database at once; they also
-cause downtime during every replacement.
+The ECS service starts with desired count `1` and uses only the
+`FARGATE_SPOT` capacity provider; it does not fall back to on-demand Fargate.
+AWS can interrupt the task with approximately two minutes of warning, and Spot
+capacity can be temporarily unavailable. ECS keeps requesting a replacement,
+but the singleton server remains offline until a Spot task reaches `RUNNING`.
+The existing 120-second container stop timeout gives TeamSpeak the full Spot
+warning window to shut down after receiving `SIGTERM`.
+
+The deployment limits are `minimumHealthyPercent=0` and `maximumPercent=100`,
+so an update stops the old task before starting a replacement. ECS deployment
+rollback is enabled. These settings prevent two tasks from intentionally
+writing the same SQLite database at once; they also cause downtime during every
+replacement.
 
 SQLite warns against placing a database on a network filesystem. This design
 explicitly accepts the risks described in [SQLite's network-filesystem
@@ -298,9 +305,10 @@ aws ecs wait services-stable \
 ```
 
 Keep using `ts.diogo-nb.com.br` after every start; the updater replaces the DNS
-value automatically. Never scale above `1`. Fargate compute and public-IPv4
-charges stop at desired count `0`; Route 53, EFS, ECR image storage, and
-retained CloudWatch log storage continue charging.
+value automatically. A start can remain pending while Fargate Spot capacity is
+unavailable. Never scale above `1`. Fargate compute and public-IPv4 charges stop
+at desired count `0`; Route 53, EFS, ECR image storage, and retained CloudWatch
+log storage continue charging.
 
 Future start/stop Lambdas and CI/CD automation are deferred. Their service
 control contract is limited to changing desired count between `0` and `1`.
@@ -316,11 +324,12 @@ aws logs tail /personal-platform/teamspeak6 \
 ```
 
 If users cannot connect, check the service desired count and running task, then
-inspect stopped-task reasons and CloudWatch logs. Compare the task's public
-IPv4 with `dig A ts.diogo-nb.com.br +short`; DNS updater logs are in
-`/personal-platform/teamspeak6/dns-updater`. Also confirm the subnet route and
-`9987/UDP` security-group rule. For file transfer, verify `30033/TCP`,
-TeamSpeak permissions and quotas, and free EFS capacity.
+inspect stopped-task reasons, pending-task events, and CloudWatch logs. A Spot
+interruption or unavailable Spot capacity can leave the desired task pending.
+Compare the task's public IPv4 with `dig A ts.diogo-nb.com.br +short`; DNS
+updater logs are in `/personal-platform/teamspeak6/dns-updater`. Also confirm
+the subnet route and `9987/UDP` security-group rule. For file transfer, verify
+`30033/TCP`, TeamSpeak permissions and quotas, and free EFS capacity.
 
 If state appears missing, scale to zero before investigation. Verify that the
 task definition mounts the expected file-system and access-point IDs at
@@ -349,12 +358,14 @@ backup strategy before an upgrade where state loss is unacceptable.
 
 ## Cost model
 
-Estimate date: 2026-09-13. Regional services use public on-demand São Paulo
-rates; Route 53 authoritative DNS uses its global rate. Values are before
-credits, support, and tax:
+Estimate date: 2026-09-14. Regional services use public São Paulo rates;
+Route 53 authoritative DNS uses its global rate. Values are before credits,
+support, and tax:
 
-- Fargate Linux/x86: USD 0.0696 per vCPU-hour plus USD 0.0076 per GB-hour. The
-  selected `0.25 vCPU / 1 GiB` task is USD 0.0250 per running hour.
+- Fargate Spot Linux/x86: USD 0.02199658 per vCPU-hour plus USD 0.00240193 per
+  GB-hour. The selected `0.25 vCPU / 0.5 GiB` task is approximately USD
+  0.00670011 per running hour. Spot rates vary with long-term supply and demand;
+  recalculate from the live AWS price table before relying on this estimate.
 - One in-use public IPv4: USD 0.005 per running hour.
 - EFS One Zone: USD 0.304 per GB-month. The estimate assumes 1 GiB average
   stored; actual storage is elastic. Bursting throughput is selected, and same-
@@ -379,11 +390,11 @@ credits, support, and tax:
   12.15%, using `USD × 5.0918 × 1.1215`. AWS invoice conversion and taxes can
   differ.
 
-| Scenario | Fargate + IPv4 | Persistent EFS/ECR + logs/DNS | USD before tax | Estimated BRL after tax |
+| Scenario | Fargate Spot + IPv4 | Persistent EFS/ECR + logs/DNS | USD before tax | Estimated BRL after tax |
 |---|---:|---:|---:|---:|
-| One 4-hour session in a month | 0.1200 | 0.9149 | 1.0349 | R$5.91 |
-| 4 hours/day for 30 days | 3.6000 | 0.9149 | 4.5149 | R$25.78 |
-| Continuously running for 730 hours | 21.9000 | 0.9149 | 22.8149 | R$130.28 |
+| One 4-hour session in a month | 0.0468 | 0.9149 | 0.9617 | R$5.49 |
+| 4 hours/day for 30 days | 1.4040 | 0.9149 | 2.3189 | R$13.24 |
+| Continuously running for 730 hours | 8.5411 | 0.9149 | 9.4560 | R$54.00 |
 
 The persistent subtotal is `1 GiB EFS + 0.2 GiB ECR + 0.1 GiB log ingestion +
 approximately 0.023 GiB-month retained log storage + one Route 53 hosted
@@ -397,6 +408,7 @@ Official references:
 - [TeamSpeak 6 configuration reference](https://github.com/teamspeak/teamspeak6-server/blob/main/CONFIG.md)
 - [Pinned Docker image tag](https://hub.docker.com/r/teamspeaksystems/teamspeak6-server/tags)
 - [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/)
+- [AWS Fargate capacity providers and Spot interruptions](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html)
 - [Amazon EFS pricing](https://aws.amazon.com/efs/pricing/)
 - [Amazon ECR pricing](https://aws.amazon.com/ecr/pricing/)
 - [Amazon CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/)

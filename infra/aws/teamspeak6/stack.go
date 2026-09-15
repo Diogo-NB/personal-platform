@@ -62,7 +62,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 
 	stackProps := props.StackProps
 	stackProps.Description = jsii.String(
-		"Personal TeamSpeak 6 beta server on ECS Fargate with retained EFS state",
+		"Personal TeamSpeak 6 beta server on ECS Fargate Spot with retained EFS state",
 	)
 	stackProps.Tags = costtags.Merge(stackProps.Tags, costtags.ApplicationTeamSpeak6)
 
@@ -166,7 +166,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		&awsecs.FargateTaskDefinitionProps{
 			Cpu:            jsii.Number(256),
 			Family:         jsii.String("teamspeak6"),
-			MemoryLimitMiB: jsii.Number(1024),
+			MemoryLimitMiB: jsii.Number(512),
 			RuntimePlatform: &awsecs.RuntimePlatform{
 				CpuArchitecture:       awsecs.CpuArchitecture_X86_64(),
 				OperatingSystemFamily: awsecs.OperatingSystemFamily_LINUX(),
@@ -233,7 +233,13 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 			Enable:   jsii.Bool(true),
 			Rollback: jsii.Bool(true),
 		},
-		Cluster:              cluster,
+		Cluster: cluster,
+		CapacityProviderStrategies: &[]*awsecs.CapacityProviderStrategy{
+			{
+				CapacityProvider: jsii.String("FARGATE_SPOT"),
+				Weight:           jsii.Number(1),
+			},
+		},
 		DesiredCount:         jsii.Number(1),
 		EnableECSManagedTags: jsii.Bool(true),
 		MaxHealthyPercent:    jsii.Number(100),
