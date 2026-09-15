@@ -49,7 +49,7 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   rule, and a small Go Lambda container that keeps `ts.diogo-nb.com.br` pointed
   at the current running task.
 
-Every taggable resource uses `Project=personal-storage`,
+Every taggable resource uses `Project=personal-platform`,
 `Application=teamspeak6`, and `Environment=production`. The ECS service
 propagates these tags to each Fargate task so compute can be grouped by
 application in AWS billing reports.

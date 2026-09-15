@@ -24,7 +24,7 @@ func TestNewBackupStackTagsBucket(t *testing.T) {
 		"Tags": []any{
 			map[string]any{"Key": "Application", "Value": "skycrate"},
 			map[string]any{"Key": "Environment", "Value": "production"},
-			map[string]any{"Key": "Project", "Value": "personal-storage"},
+			map[string]any{"Key": "Project", "Value": "personal-platform"},
 		},
 	})
 }

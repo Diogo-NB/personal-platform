@@ -15,7 +15,7 @@ const (
 	ApplicationTeamSpeak6 = "teamspeak6"
 )
 
-const project = "personal-storage"
+const project = "personal-platform"
 
 // Merge returns stack tags containing the shared taxonomy and any additional
 // caller-provided tags. Shared keys take precedence to keep cost reporting

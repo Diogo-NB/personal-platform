@@ -388,7 +388,7 @@ func assertCostAllocationTags(
 	expected := map[string]string{
 		"Application": application,
 		"Environment": "production",
-		"Project":     "personal-storage",
+		"Project":     "personal-platform",
 	}
 
 	resources, ok := (*template.ToJSON())["Resources"].(map[string]any)

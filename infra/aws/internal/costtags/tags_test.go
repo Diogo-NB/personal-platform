@@ -13,7 +13,7 @@ func TestMerge(t *testing.T) {
 		"Application": "skycrate",
 		"Custom":      "retained",
 		"Environment": "production",
-		"Project":     "personal-storage",
+		"Project":     "personal-platform",
 	}
 
 	if len(tags) != len(expected) {

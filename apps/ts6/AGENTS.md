@@ -38,7 +38,7 @@ runbook. The CDK implementation is in `../../infra/aws/teamspeak6`.
 - Always configure `TSSERVER_LICENSE_ACCEPTED=accept` in the ECS task and local
   Compose service. Do not require a CDK context flag or shell environment
   variable for license acceptance.
-- Tag every taggable resource with `Project=personal-storage`,
+- Tag every taggable resource with `Project=personal-platform`,
   `Application=teamspeak6`, and `Environment=production`. Propagate the service
   tags to Fargate tasks.
 

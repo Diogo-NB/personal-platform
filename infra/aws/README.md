@@ -15,7 +15,7 @@ The existing storage stack provisions the `skycrate-storage` S3 bucket in
 `us-east-1`. Do not change its Region when adding regional stacks to this CDK
 application.
 
-The TeamSpeak stack provisions a single public ECS Fargate task in
+The TeamSpeak stack provisions a single public ECS Fargate Spot task in
 `sa-east-1`, backed by an encrypted retained EFS One Zone file system. Its
 Docker image is built from `apps/ts6` and published as a CDK ECR asset. A
 separate reusable Go Lambda container asset is built from `apps/dns-updater`;
@@ -33,7 +33,7 @@ taggable resource:
 
 | Tag | Storage value | TeamSpeak value | Purpose |
 |---|---|---|---|
-| `Project` | `personal-storage` | `personal-storage` | Aggregate the complete project cost. |
+| `Project` | `personal-platform` | `personal-platform` | Aggregate the complete project cost. |
 | `Application` | `skycrate` | `teamspeak6` | Split costs by application. |
 | `Environment` | `production` | `production` | Separate long-lived and future non-production resources. |
 
