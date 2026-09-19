@@ -16,8 +16,10 @@ import (
 	"github.com/aws/aws-cdk-go/awscdk/v2/awseventstargets"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsiam"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awslambda"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awslambdaeventsources"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awslogs"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsroute53"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awssqs"
 	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
 )
@@ -29,6 +31,8 @@ const (
 	dnsRecordTTL              = 60
 	dnsUpdaterScheduleMinutes = 5
 	serviceName               = "teamspeak6"
+	commandQueueName          = "personal-platform-teamspeak6-commands.fifo"
+	commandDLQName            = "personal-platform-teamspeak6-commands-dlq.fifo"
 )
 
 // StackProps configures the TeamSpeak stack and its isolated Docker image assets.
@@ -49,6 +53,8 @@ type stackOutputResources struct {
 	hostedZone    awsroute53.PublicHostedZone
 	managementAPI awsapigateway.RestApi
 	managementKey awsapigateway.IApiKey
+	commandQueue  awssqs.Queue
+	commandDLQ    awssqs.Queue
 }
 
 // NewStack creates the TeamSpeak 6 Fargate service with license acceptance
@@ -314,14 +320,18 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		hostedZone:    hostedZone,
 		managementAPI: management.api,
 		managementKey: management.key,
+		commandQueue:  management.commandQueue,
+		commandDLQ:    management.commandDLQ,
 	})
 
 	return stack
 }
 
 type managementResources struct {
-	api awsapigateway.RestApi
-	key awsapigateway.IApiKey
+	api          awsapigateway.RestApi
+	key          awsapigateway.IApiKey
+	commandQueue awssqs.Queue
+	commandDLQ   awssqs.Queue
 }
 
 func newManagementAPI(
@@ -334,6 +344,28 @@ func newManagementAPI(
 		LogGroupName:  jsii.String("/personal-platform/teamspeak6/management"),
 		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
 		Retention:     awslogs.RetentionDays_ONE_WEEK,
+	})
+	commandDLQ := awssqs.NewQueue(stack, jsii.String("ManagementCommandDLQ"), &awssqs.QueueProps{
+		ContentBasedDeduplication: jsii.Bool(true),
+		Encryption:                awssqs.QueueEncryption_SQS_MANAGED,
+		EnforceSSL:                jsii.Bool(true),
+		Fifo:                      jsii.Bool(true),
+		QueueName:                 jsii.String(commandDLQName),
+		RemovalPolicy:             awscdk.RemovalPolicy_DESTROY,
+		RetentionPeriod:           awscdk.Duration_Days(jsii.Number(14)),
+	})
+	commandQueue := awssqs.NewQueue(stack, jsii.String("ManagementCommandQueue"), &awssqs.QueueProps{
+		ContentBasedDeduplication: jsii.Bool(true),
+		DeadLetterQueue: &awssqs.DeadLetterQueue{
+			MaxReceiveCount: jsii.Number(5),
+			Queue:           commandDLQ,
+		},
+		Encryption:        awssqs.QueueEncryption_SQS_MANAGED,
+		EnforceSSL:        jsii.Bool(true),
+		Fifo:              jsii.Bool(true),
+		QueueName:         jsii.String(commandQueueName),
+		RemovalPolicy:     awscdk.RemovalPolicy_DESTROY,
+		VisibilityTimeout: awscdk.Duration_Seconds(jsii.Number(90)),
 	})
 	function := awslambda.NewDockerImageFunction(
 		stack,
@@ -383,6 +415,13 @@ func newManagementAPI(
 		Actions:   &[]*string{jsii.String("ecs:DescribeTasks")},
 		Resources: &[]*string{taskARN},
 	}))
+	function.AddEventSource(awslambdaeventsources.NewSqsEventSource(
+		commandQueue,
+		&awslambdaeventsources.SqsEventSourceProps{
+			BatchSize:               jsii.Number(1),
+			ReportBatchItemFailures: jsii.Bool(true),
+		},
+	))
 
 	api := awsapigateway.NewRestApi(stack, jsii.String("ManagementAPI"), &awsapigateway.RestApiProps{
 		ApiKeySourceType: awsapigateway.ApiKeySourceType_HEADER,
@@ -438,7 +477,12 @@ func newManagementAPI(
 	})
 	usagePlan.AddApiKey(key, nil)
 
-	return managementResources{api: api, key: key}
+	return managementResources{
+		api:          api,
+		key:          key,
+		commandQueue: commandQueue,
+		commandDLQ:   commandDLQ,
+	}
 }
 
 func newDNSUpdater(
@@ -579,6 +623,21 @@ func newOutputs(stack awscdk.Stack, resources stackOutputResources) {
 			id:          "ManagementAPIKeyID",
 			value:       resources.managementKey.KeyId(),
 			description: "API key ID used to retrieve the private key value",
+		},
+		{
+			id:          "ManagementCommandQueueURL",
+			value:       resources.commandQueue.QueueUrl(),
+			description: "FIFO queue URL for TeamSpeak lifecycle commands",
+		},
+		{
+			id:          "ManagementCommandQueueARN",
+			value:       resources.commandQueue.QueueArn(),
+			description: "FIFO queue ARN for TeamSpeak lifecycle commands",
+		},
+		{
+			id:          "ManagementCommandDLQURL",
+			value:       resources.commandDLQ.QueueUrl(),
+			description: "Dead-letter queue URL for failed lifecycle commands",
 		},
 	}
 

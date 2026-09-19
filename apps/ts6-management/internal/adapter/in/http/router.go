@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	sqsadapter "github.com/diogo-nb/personal-platform/apps/ts6-management/internal/adapter/in/sqs"
 	"github.com/diogo-nb/personal-platform/apps/ts6-management/internal/domain/lifecycle"
 	portin "github.com/diogo-nb/personal-platform/apps/ts6-management/internal/port/in"
 )
@@ -35,6 +36,10 @@ func New(service portin.Lifecycle, logger *slog.Logger) (*gin.Engine, error) {
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
 	h := &handler{lifecycle: service, logger: logger}
+	eventHandler, err := sqsadapter.New(service, logger)
+	if err != nil {
+		return nil, err
+	}
 
 	// Gin's default recovery output includes the panic value and request metadata.
 	router.Use(gin.CustomRecoveryWithWriter(io.Discard, func(c *gin.Context, _ any) {
@@ -44,6 +49,7 @@ func New(service portin.Lifecycle, logger *slog.Logger) (*gin.Engine, error) {
 	router.POST("/start", h.start)
 	router.POST("/stop", h.stop)
 	router.GET("/status", h.status)
+	router.POST("/internal/events", eventHandler)
 	router.GET("/internal/readiness", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})

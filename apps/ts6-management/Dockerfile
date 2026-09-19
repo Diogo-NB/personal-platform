@@ -13,6 +13,7 @@ FROM public.ecr.aws/lambda/provided:al2023
 COPY --from=lambda-adapter /lambda-adapter /opt/extensions/lambda-adapter
 COPY --from=build /out/bootstrap /var/task/bootstrap
 ENV AWS_LWA_PORT=8080 \
+    AWS_LWA_PASS_THROUGH_PATH=/internal/events \
     AWS_LWA_READINESS_CHECK_PATH=/internal/readiness \
     AWS_LWA_READINESS_CHECK_HEALTHY_STATUS=200-299
 EXPOSE 8080

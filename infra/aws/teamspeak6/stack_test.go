@@ -289,6 +289,39 @@ func TestNewStackTemplate(t *testing.T) {
 			"RetentionInDays": float64(7),
 		})
 		template.ResourceCountIs(jsii.String("AWS::Lambda::Function"), jsii.Number(2))
+		template.HasResourceProperties(jsii.String("AWS::SQS::Queue"), map[string]any{
+			"ContentBasedDeduplication": true,
+			"FifoQueue":                 true,
+			"QueueName":                 commandDLQName,
+			"MessageRetentionPeriod":    float64(1_209_600),
+			"SqsManagedSseEnabled":      true,
+		})
+		template.HasResourceProperties(jsii.String("AWS::SQS::Queue"), map[string]any{
+			"ContentBasedDeduplication": true,
+			"FifoQueue":                 true,
+			"QueueName":                 commandQueueName,
+			"RedrivePolicy": map[string]any{
+				"deadLetterTargetArn": assertions.Match_AnyValue(),
+				"maxReceiveCount":     float64(5),
+			},
+			"SqsManagedSseEnabled": true,
+			"VisibilityTimeout":    float64(90),
+		})
+		template.ResourceCountIs(jsii.String("AWS::SQS::Queue"), jsii.Number(2))
+		template.HasResourceProperties(jsii.String("AWS::Lambda::EventSourceMapping"), map[string]any{
+			"BatchSize": float64(1),
+			"EventSourceArn": map[string]any{
+				"Fn::GetAtt": []any{
+					assertions.Match_StringLikeRegexp(jsii.String("ManagementCommandQueue.*")),
+					"Arn",
+				},
+			},
+			"FunctionName": map[string]any{
+				"Ref": assertions.Match_StringLikeRegexp(jsii.String("ManagementFunction.*")),
+			},
+			"FunctionResponseTypes": []any{"ReportBatchItemFailures"},
+		})
+		template.ResourceCountIs(jsii.String("AWS::Lambda::EventSourceMapping"), jsii.Number(1))
 
 		template.HasResourceProperties(jsii.String("AWS::ApiGateway::RestApi"), map[string]any{
 			"ApiKeySourceType": "HEADER",
@@ -346,6 +379,16 @@ func TestNewStackTemplate(t *testing.T) {
 		if got := ecsIAMActions(t, template); !reflect.DeepEqual(got, expectedActions) {
 			t.Errorf("ECS IAM actions = %v, want %v", got, expectedActions)
 		}
+		expectedSQSActions := []string{
+			"sqs:ChangeMessageVisibility",
+			"sqs:DeleteMessage",
+			"sqs:GetQueueAttributes",
+			"sqs:GetQueueUrl",
+			"sqs:ReceiveMessage",
+		}
+		if got := sqsIAMActions(t, template); !reflect.DeepEqual(got, expectedSQSActions) {
+			t.Errorf("SQS IAM actions = %v, want %v", got, expectedSQSActions)
+		}
 		template.HasResourceProperties(jsii.String("AWS::IAM::Policy"), map[string]any{
 			"PolicyDocument": map[string]any{
 				"Statement": assertions.Match_ArrayWith(&[]any{
@@ -372,7 +415,6 @@ func TestNewStackTemplate(t *testing.T) {
 				"Version": "2012-10-17",
 			},
 		})
-
 		for _, resourceType := range []string{
 			"AWS::ApiGateway::BasePathMapping",
 			"AWS::ApiGateway::DomainName",
@@ -399,6 +441,9 @@ func TestNewStackTemplate(t *testing.T) {
 			"TeamSpeakAddress",
 			"ManagementAPIURL",
 			"ManagementAPIKeyID",
+			"ManagementCommandQueueURL",
+			"ManagementCommandQueueARN",
+			"ManagementCommandDLQURL",
 		}
 		for _, output := range expectedOutputs {
 			template.HasOutput(jsii.String(output), map[string]any{
@@ -503,25 +548,27 @@ func assertCostAllocationTags(
 	t.Helper()
 
 	tagPropertyByResourceType := map[string]string{
-		"AWS::ApiGateway::ApiKey":    "Tags",
-		"AWS::ApiGateway::RestApi":   "Tags",
-		"AWS::ApiGateway::Stage":     "Tags",
-		"AWS::ApiGateway::UsagePlan": "Tags",
-		"AWS::EC2::InternetGateway":  "Tags",
-		"AWS::EC2::RouteTable":       "Tags",
-		"AWS::EC2::SecurityGroup":    "Tags",
-		"AWS::EC2::Subnet":           "Tags",
-		"AWS::EC2::VPC":              "Tags",
-		"AWS::ECS::Cluster":          "Tags",
-		"AWS::ECS::Service":          "Tags",
-		"AWS::ECS::TaskDefinition":   "Tags",
-		"AWS::EFS::AccessPoint":      "AccessPointTags",
-		"AWS::EFS::FileSystem":       "FileSystemTags",
-		"AWS::Events::Rule":          "Tags",
-		"AWS::IAM::Role":             "Tags",
-		"AWS::Lambda::Function":      "Tags",
-		"AWS::Logs::LogGroup":        "Tags",
-		"AWS::Route53::HostedZone":   "HostedZoneTags",
+		"AWS::ApiGateway::ApiKey":         "Tags",
+		"AWS::ApiGateway::RestApi":        "Tags",
+		"AWS::ApiGateway::Stage":          "Tags",
+		"AWS::ApiGateway::UsagePlan":      "Tags",
+		"AWS::EC2::InternetGateway":       "Tags",
+		"AWS::EC2::RouteTable":            "Tags",
+		"AWS::EC2::SecurityGroup":         "Tags",
+		"AWS::EC2::Subnet":                "Tags",
+		"AWS::EC2::VPC":                   "Tags",
+		"AWS::ECS::Cluster":               "Tags",
+		"AWS::ECS::Service":               "Tags",
+		"AWS::ECS::TaskDefinition":        "Tags",
+		"AWS::EFS::AccessPoint":           "AccessPointTags",
+		"AWS::EFS::FileSystem":            "FileSystemTags",
+		"AWS::Events::Rule":               "Tags",
+		"AWS::IAM::Role":                  "Tags",
+		"AWS::Lambda::EventSourceMapping": "Tags",
+		"AWS::Lambda::Function":           "Tags",
+		"AWS::Logs::LogGroup":             "Tags",
+		"AWS::Route53::HostedZone":        "HostedZoneTags",
+		"AWS::SQS::Queue":                 "Tags",
 	}
 	expected := map[string]string{
 		"Application": application,
@@ -746,6 +793,14 @@ func apiRoutes(t *testing.T, template assertions.Template) map[string]apiRoute {
 }
 
 func ecsIAMActions(t *testing.T, template assertions.Template) []string {
+	return iamActions(t, template, "ecs:")
+}
+
+func sqsIAMActions(t *testing.T, template assertions.Template) []string {
+	return iamActions(t, template, "sqs:")
+}
+
+func iamActions(t *testing.T, template assertions.Template, prefix string) []string {
 	t.Helper()
 
 	resources, ok := (*template.ToJSON())["Resources"].(map[string]any)
@@ -766,13 +821,13 @@ func ecsIAMActions(t *testing.T, template assertions.Template) []string {
 			statement, _ := statementValue.(map[string]any)
 			switch values := statement["Action"].(type) {
 			case string:
-				if strings.HasPrefix(values, "ecs:") {
+				if strings.HasPrefix(values, prefix) {
 					actions[values] = struct{}{}
 				}
 			case []any:
 				for _, value := range values {
 					action, _ := value.(string)
-					if strings.HasPrefix(action, "ecs:") {
+					if strings.HasPrefix(action, prefix) {
 						actions[action] = struct{}{}
 					}
 				}

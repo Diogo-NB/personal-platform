@@ -80,6 +80,7 @@ func TestNewRoutes(t *testing.T) {
 		name       string
 		method     string
 		path       string
+		body       string
 		service    *fakeLifecycle
 		wantStatus int
 		wantBody   string
@@ -106,11 +107,55 @@ func TestNewRoutes(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantBody:   `{"state":"stopped","startedAt":null,"uptimeSeconds":null}`,
 		},
-		{name: "readiness", method: http.MethodGet, path: "/internal/readiness", service: &fakeLifecycle{}, wantStatus: http.StatusNoContent},
-		{name: "wrong start method", method: http.MethodGet, path: "/start", service: &fakeLifecycle{}, wantStatus: http.StatusMethodNotAllowed, wantBody: "405 method not allowed"},
-		{name: "wrong stop method", method: http.MethodGet, path: "/stop", service: &fakeLifecycle{}, wantStatus: http.StatusMethodNotAllowed, wantBody: "405 method not allowed"},
-		{name: "wrong status method", method: http.MethodPost, path: "/status", service: &fakeLifecycle{}, wantStatus: http.StatusMethodNotAllowed, wantBody: "405 method not allowed"},
-		{name: "unknown path", method: http.MethodGet, path: "/unknown", service: &fakeLifecycle{}, wantStatus: http.StatusNotFound, wantBody: "404 page not found"},
+		{
+			name:       "readiness",
+			method:     http.MethodGet,
+			path:       "/internal/readiness",
+			service:    &fakeLifecycle{},
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:   "internal sqs events",
+			method: http.MethodPost,
+			path:   "/internal/events",
+			body: `{"Records":[{"messageId":"message-1",` +
+				`"body":"{\"action\":\"start\"}","attributes":{"MessageGroupId":"teamspeak6"}}]}`,
+			service:    &fakeLifecycle{},
+			wantStatus: http.StatusOK,
+			wantBody:   `{"batchItemFailures":[]}`,
+		},
+		{
+			name:       "wrong start method",
+			method:     http.MethodGet,
+			path:       "/start",
+			service:    &fakeLifecycle{},
+			wantStatus: http.StatusMethodNotAllowed,
+			wantBody:   "405 method not allowed",
+		},
+		{
+			name:       "wrong stop method",
+			method:     http.MethodGet,
+			path:       "/stop",
+			service:    &fakeLifecycle{},
+			wantStatus: http.StatusMethodNotAllowed,
+			wantBody:   "405 method not allowed",
+		},
+		{
+			name:       "wrong status method",
+			method:     http.MethodPost,
+			path:       "/status",
+			service:    &fakeLifecycle{},
+			wantStatus: http.StatusMethodNotAllowed,
+			wantBody:   "405 method not allowed",
+		},
+		{
+			name:       "unknown path",
+			method:     http.MethodGet,
+			path:       "/unknown",
+			service:    &fakeLifecycle{},
+			wantStatus: http.StatusNotFound,
+			wantBody:   "404 page not found",
+		},
 	}
 
 	for _, test := range tests {
@@ -118,7 +163,7 @@ func TestNewRoutes(t *testing.T) {
 			t.Parallel()
 
 			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(test.method, test.path, nil)
+			request := httptest.NewRequest(test.method, test.path, bytes.NewBufferString(test.body))
 			newRouter(t, test.service, slog.New(slog.NewTextHandler(io.Discard, nil))).ServeHTTP(recorder, request)
 
 			if recorder.Code != test.wantStatus {
@@ -156,9 +201,24 @@ func TestNewReturnsGenericErrorsWithoutDetails(t *testing.T) {
 		path    string
 		service *fakeLifecycle
 	}{
-		{name: "start", method: http.MethodPost, path: "/start", service: &fakeLifecycle{startError: errors.New("secret task detail")}},
-		{name: "stop", method: http.MethodPost, path: "/stop", service: &fakeLifecycle{stopError: errors.New("secret task detail")}},
-		{name: "status", method: http.MethodGet, path: "/status", service: &fakeLifecycle{statusError: errors.New("secret task detail")}},
+		{
+			name:    "start",
+			method:  http.MethodPost,
+			path:    "/start",
+			service: &fakeLifecycle{startError: errors.New("secret task detail")},
+		},
+		{
+			name:    "stop",
+			method:  http.MethodPost,
+			path:    "/stop",
+			service: &fakeLifecycle{stopError: errors.New("secret task detail")},
+		},
+		{
+			name:    "status",
+			method:  http.MethodGet,
+			path:    "/status",
+			service: &fakeLifecycle{statusError: errors.New("secret task detail")},
+		},
 	}
 
 	for _, test := range tests {

@@ -32,13 +32,15 @@ ECS RUNNING events --+
                       +--> Lambda DNS updater --> Route 53 A record
 5-minute schedule ----+
 
-Operator -- x-api-key --> API Gateway REST API (prod)
-                              |
-                              v
-                    Lambda management service
-                     | start / stop / status
-                     v
-                  ECS service
+Operator -- x-api-key --> API Gateway REST API (prod) --+
+                                                         |
+Command sender --> encrypted SQS FIFO queue -------------+
+                    group: teamspeak6                    |
+                                                         v
+                                              Lambda management service
+                                               | start / stop / status
+                                               v
+                                            ECS service
 ```
 
 The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
@@ -60,6 +62,9 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   stopping, and reporting the status of the singleton ECS service. All three
   public methods require a generated API key and share a two-request/second,
   burst-five usage plan.
+- An encrypted FIFO lifecycle-command queue and encrypted FIFO dead-letter
+  queue. The command queue directly invokes the same management Lambda with a
+  batch size of one and partial-batch failure reporting.
 
 Every taggable resource uses `Project=personal-platform`,
 `Application=teamspeak6`, and `Environment=production`. The ECS service
@@ -78,6 +83,8 @@ custom domain, Route 53 record, CORS policy, Lambda Function URL, or browser
 client. An API key is lightweight access control and request metering, not
 strong authentication or authorization. AWS recommends stronger authorization
 for sensitive APIs; this limitation is accepted for the initial private v1.
+The Lambda Web Adapter's private `POST /internal/events` pass-through route is
+not an API Gateway resource and cannot be reached through the management URL.
 
 ## Application images and local use
 
@@ -130,8 +137,8 @@ asset under [`../ts6-management`](../ts6-management/README.md). It uses Gin
 1.12 and AWS Lambda Web Adapter v1.0.1 on `provided.al2023`, listens on port
 8080, and receives `CLUSTER_ARN` and `SERVICE_NAME` from CDK. Its hexagonal
 dependency direction keeps the lifecycle domain and application service
-independent of Gin and the AWS SDK, so a later EventBridge adapter can reuse
-the same use cases.
+independent of Gin and the AWS SDK. Both the HTTP and SQS inbound adapters call
+the same lifecycle application service.
 
 `POST /start` changes desired count from zero to one and otherwise does
 nothing. `POST /stop` changes a positive desired count to zero, including an
@@ -140,6 +147,11 @@ accepts the request and do not wait for stability. `GET /status` maps desired,
 running, and pending counts to `stopped`, `starting`, `running`, or `stopping`.
 Only `running` includes a UTC start time and whole-second uptime. Missing or
 malformed ECS data and singleton violations return a generic `500` response.
+
+The SQS adapter requires an `action` value of `start` or `stop`. Lambda Web
+Adapter receives the native SQS invocation and posts it to `/internal/events`
+on localhost inside the execution environment; SQS does not call the route over
+the network. Failed records are returned through `batchItemFailures` for retry.
 
 The TeamSpeak deployment uses the account's shared regional Lambda concurrency
 instead of reserving capacity for the updater. Duplicate EventBridge deliveries
@@ -258,7 +270,7 @@ All three Docker assets are built locally for `linux/amd64` and published throug
 the CDK bootstrap ECR asset repository. The application does not create a
 separate named ECR repository.
 
-## Management API setup and operation
+## Management API and command queue operation
 
 The deployment outputs `ManagementAPIURL` and `ManagementAPIKeyID`. The key
 value is intentionally absent from CloudFormation outputs and source control.
@@ -303,6 +315,45 @@ The URL output ends in `/prod/`. Missing or invalid keys receive API Gateway's
 `403` response. Successful start and stop responses are empty `202` responses.
 Conflicting concurrent start and stop requests use last-accepted-write
 semantics. The API has no durable lifecycle history.
+
+The deployment also outputs `ManagementCommandQueueURL`,
+`ManagementCommandQueueARN`, and `ManagementCommandDLQURL`. The command queue
+invokes the management Lambda directly; it does not call API Gateway or require
+the management API key. Every sender must use FIFO message-group ID
+`teamspeak6`. For example:
+
+```bash
+aws sqs send-message \
+  --region sa-east-1 \
+  --queue-url '<ManagementCommandQueueURL>' \
+  --message-group-id teamspeak6 \
+  --message-body '{"action":"start"}'
+
+aws sqs send-message \
+  --region sa-east-1 \
+  --queue-url '<ManagementCommandQueueURL>' \
+  --message-group-id teamspeak6 \
+  --message-body '{"action":"stop"}'
+```
+
+The body must contain the case-sensitive `action` field with value `start` or
+`stop`. Additional fields are ignored. Content-based deduplication is enabled.
+Identical bodies sent within SQS's deduplication interval are accepted as
+duplicates but delivered once unless the sender supplies explicit deduplication
+IDs with different semantics. To express a new repeated command within the
+five-minute interval, provide a new explicit message-deduplication ID.
+
+The Lambda event-source mapping reads one message per invocation to preserve
+order and isolate failures. The queue visibility timeout is 90 seconds for the
+15-second Lambda timeout. Failed messages are retried and move to the encrypted
+FIFO DLQ after five receives; the DLQ retains them for 14 days. Inspect and
+redrive DLQ messages deliberately because the DLQ is operational evidence, not
+durable lifecycle history.
+
+SQS delivery is at least once. Duplicate start and stop commands are safe
+because the lifecycle service reconciles the current desired count. Ordering
+applies only inside the `teamspeak6` SQS message group. API requests can
+interleave with queue commands under the existing last-accepted-write behavior.
 
 ## DNS setup and automatic updates
 
@@ -401,8 +452,8 @@ unavailable. Never scale above `1`. Fargate compute and public-IPv4 charges stop
 at desired count `0`; Route 53, EFS, ECR image storage, and retained CloudWatch
 log storage continue charging.
 
-Stronger authentication, browser/CORS support, event-triggered lifecycle
-changes, durable history, and CI/CD automation remain deferred.
+Stronger authentication, browser/CORS support, durable history, sender roles
+and automations, and CI/CD automation remain deferred.
 
 ## Logs and troubleshooting
 
@@ -478,6 +529,12 @@ support, and tax:
   REST API tier's USD 3.50 per million requests, that is about USD 0.0011. The
   128 MiB management Lambda's request and duration usage is expected to fit
   within Lambda's shared monthly free tier when that allowance is available.
+- The two SSE-SQS encrypted FIFO queues have no minimum fee. Send, receive,
+  delete, visibility-change, payload-size, and retained-message usage is
+  metered. This low-volume estimate treats the added SQS request and DLQ storage
+  cost as zero at its precision when the shared monthly SQS free tier is
+  available; recalculate if other workloads consume that allowance or failed
+  messages accumulate.
 - Internet data transfer out: the first 100 GB per month is free in aggregate
   across eligible AWS services and Regions; São Paulo's first paid tier is USD
   0.15 per GB. The scenarios assume usage remains inside the shared free tier.
@@ -513,6 +570,7 @@ Official references:
 - [Registro.br domain and DNS guidance](https://registro.br/ajuda/registro-de-novos-dominios/)
 - [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/)
 - [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
+- [Amazon SQS pricing](https://aws.amazon.com/sqs/pricing/)
 - [API Gateway usage-plan and API-key guidance](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-api-usage-plans.html)
 - [Amazon EventBridge pricing](https://aws.amazon.com/eventbridge/pricing/)
 - [Public IPv4 pricing](https://aws.amazon.com/vpc/pricing/)
@@ -526,7 +584,7 @@ stored data, image size, logging, or transfer assumptions change.
 ## Deferred work and recovery limits
 
 Deferred work includes stronger management authorization, browser/CORS
-support, event-triggered lifecycle wiring, durable lifecycle history, CI/CD,
+support, command sender roles and automations, durable lifecycle history, CI/CD,
 Route 53 DNSSEC signing, backups and tested restore, monitoring alarms, and
 automated budget controls. None is implied by the current stack.
 
