@@ -31,6 +31,14 @@ Internet
 ECS RUNNING events --+
                       +--> Lambda DNS updater --> Route 53 A record
 5-minute schedule ----+
+
+Operator -- x-api-key --> API Gateway REST API (prod)
+                              |
+                              v
+                    Lambda management service
+                     | start / stop / status
+                     v
+                  ECS service
 ```
 
 The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
@@ -48,6 +56,10 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
 - A retained Route 53 public hosted zone for `diogo-nb.com.br`, an EventBridge
   rule, and a small Go Lambda container that keeps `ts.diogo-nb.com.br` pointed
   at the current running task.
+- A regional API Gateway REST API and 128 MiB Go Lambda container for starting,
+  stopping, and reporting the status of the singleton ECS service. All three
+  public methods require a generated API key and share a two-request/second,
+  burst-five usage plan.
 
 Every taggable resource uses `Project=personal-platform`,
 `Application=teamspeak6`, and `Environment=production`. The ECS service
@@ -60,6 +72,12 @@ the task; it does not proxy traffic or make the public IPv4 static. The
 security group admits only `9987/UDP` and `30033/TCP` from IPv4 clients. Query
 SSH (`10022`), HTTP (`10080`), and HTTPS (`10443`) are disabled in
 `tsserver.yaml` and have no ingress rules.
+
+The management API uses the default API Gateway execute-api hostname. It has no
+custom domain, Route 53 record, CORS policy, Lambda Function URL, or browser
+client. An API key is lightweight access control and request metering, not
+strong authentication or authorization. AWS recommends stronger authorization
+for sensitive APIs; this limitation is accepted for the initial private v1.
 
 ## Application images and local use
 
@@ -107,6 +125,22 @@ environment, EventBridge filter, and IAM permissions.
 The updater reads `CLUSTER_ARN`, `SERVICE_NAME`, `HOSTED_ZONE_ID`, `DNS_NAME`,
 and `DNS_TTL` from the Lambda environment. CDK supplies all five values.
 
+The management service is the independent Go 1.27.1 application and Docker
+asset under [`../ts6-management`](../ts6-management/README.md). It uses Gin
+1.12 and AWS Lambda Web Adapter v1.0.1 on `provided.al2023`, listens on port
+8080, and receives `CLUSTER_ARN` and `SERVICE_NAME` from CDK. Its hexagonal
+dependency direction keeps the lifecycle domain and application service
+independent of Gin and the AWS SDK, so a later EventBridge adapter can reuse
+the same use cases.
+
+`POST /start` changes desired count from zero to one and otherwise does
+nothing. `POST /stop` changes a positive desired count to zero, including an
+unexpected value above one as a safety action. Both return `202` as soon as ECS
+accepts the request and do not wait for stability. `GET /status` maps desired,
+running, and pending counts to `stopped`, `starting`, `running`, or `stopping`.
+Only `running` includes a UTC start time and whole-second uptime. Missing or
+malformed ECS data and singleton violations return a generic `500` response.
+
 The TeamSpeak deployment uses the account's shared regional Lambda concurrency
 instead of reserving capacity for the updater. Duplicate EventBridge deliveries
 can therefore overlap, but the updater reconciles current ECS state and uses an
@@ -116,6 +150,14 @@ To validate the module and its image locally:
 
 ```bash
 cd apps/dns-updater
+go mod verify
+go test -race ./...
+go vet ./...
+go build ./...
+govulncheck ./... # when installed
+docker build --platform linux/amd64 .
+
+cd ../ts6-management
 go mod verify
 go test -race ./...
 go vet ./...
@@ -203,7 +245,8 @@ cdk diff PersonalPlatformTeamspeak6Stack
 Deploy only while the ECS service currently has desired count `1` and is
 running. A CDK deployment reconciles the template's desired count back to `1`,
 so deploying while the service is intentionally stopped would unexpectedly
-start it.
+start it. This warning still applies when the service was stopped through the
+management API.
 
 After explicit approval, the user deploys:
 
@@ -211,9 +254,55 @@ After explicit approval, the user deploys:
 cdk deploy PersonalPlatformTeamspeak6Stack
 ```
 
-Both Docker assets are built locally for `linux/amd64` and published through
+All three Docker assets are built locally for `linux/amd64` and published through
 the CDK bootstrap ECR asset repository. The application does not create a
 separate named ECR repository.
+
+## Management API setup and operation
+
+The deployment outputs `ManagementAPIURL` and `ManagementAPIKeyID`. The key
+value is intentionally absent from CloudFormation outputs and source control.
+After deployment, retrieve it privately using the output key ID:
+
+```bash
+aws apigateway get-api-key \
+  --region sa-east-1 \
+  --api-key <ManagementAPIKeyID> \
+  --include-value \
+  --query value \
+  --output text
+```
+
+Store the value in a password manager. Do not paste it into logs, issues,
+shell history, or committed environment files. The following examples use a
+temporary shell variable; enter its value without sharing terminal output:
+
+```bash
+export TS6_MANAGEMENT_URL='<ManagementAPIURL>'
+read -rs TS6_MANAGEMENT_API_KEY
+export TS6_MANAGEMENT_API_KEY
+
+curl --fail-with-body \
+  -X POST \
+  -H "x-api-key: ${TS6_MANAGEMENT_API_KEY}" \
+  "${TS6_MANAGEMENT_URL}start"
+
+curl --fail-with-body \
+  -H "x-api-key: ${TS6_MANAGEMENT_API_KEY}" \
+  "${TS6_MANAGEMENT_URL}status"
+
+curl --fail-with-body \
+  -X POST \
+  -H "x-api-key: ${TS6_MANAGEMENT_API_KEY}" \
+  "${TS6_MANAGEMENT_URL}stop"
+
+unset TS6_MANAGEMENT_API_KEY
+```
+
+The URL output ends in `/prod/`. Missing or invalid keys receive API Gateway's
+`403` response. Successful start and stop responses are empty `202` responses.
+Conflicting concurrent start and stop requests use last-accepted-write
+semantics. The API has no durable lifecycle history.
 
 ## DNS setup and automatic updates
 
@@ -274,7 +363,9 @@ prompts, and remember that seven-day retention limits operational history.
 
 ## Start and stop
 
-Stop the service after informing connected users:
+Prefer the management API commands above. For break-glass operation, the user
+can still call ECS directly after confirming the account, Region, cluster, and
+service. Stop the service only after informing connected users:
 
 ```bash
 aws ecs update-service \
@@ -310,8 +401,8 @@ unavailable. Never scale above `1`. Fargate compute and public-IPv4 charges stop
 at desired count `0`; Route 53, EFS, ECR image storage, and retained CloudWatch
 log storage continue charging.
 
-Future start/stop Lambdas and CI/CD automation are deferred. Their service
-control contract is limited to changing desired count between `0` and `1`.
+Stronger authentication, browser/CORS support, event-triggered lifecycle
+changes, durable history, and CI/CD automation remain deferred.
 
 ## Logs and troubleshooting
 
@@ -358,7 +449,7 @@ backup strategy before an upgrade where state loss is unacceptable.
 
 ## Cost model
 
-Estimate date: 2026-09-14. Regional services use public São Paulo rates;
+Estimate date: 2026-09-19. Regional services use public São Paulo rates;
 Route 53 authoritative DNS uses its global rate. Values are before credits,
 support, and tax:
 
@@ -370,9 +461,9 @@ support, and tax:
 - EFS One Zone: USD 0.304 per GB-month. The estimate assumes 1 GiB average
   stored; actual storage is elastic. Bursting throughput is selected, and same-
   AZ access has no data-transfer charge.
-- Private ECR storage: USD 0.10 per GB-month. The estimate allows 0.2 GiB for
-  the current compressed TeamSpeak and DNS updater image assets; old assets can
-  increase this.
+- Private ECR storage: USD 0.10 per GB-month. The estimate allows 0.3 GiB for
+  the current compressed TeamSpeak, DNS updater, and management image assets;
+  old assets can increase this.
 - CloudWatch Logs: USD 0.90 per GB ingested and USD 0.0408 per GB-month stored.
   The estimate allows 0.1 GiB ingested per month and seven-day retention.
 - Route 53 authoritative DNS: USD 0.50 per hosted zone per month and USD 0.40
@@ -383,6 +474,10 @@ support, and tax:
   invocations fit within Lambda's monthly 1 million-request and 400,000
   GB-second free tier if those allowances are not consumed elsewhere. Its log
   volume is included in the CloudWatch allowance above.
+- The REST management API estimate assumes 300 calls per month. At the first
+  REST API tier's USD 3.50 per million requests, that is about USD 0.0011. The
+  128 MiB management Lambda's request and duration usage is expected to fit
+  within Lambda's shared monthly free tier when that allowance is available.
 - Internet data transfer out: the first 100 GB per month is free in aggregate
   across eligible AWS services and Regions; São Paulo's first paid tier is USD
   0.15 per GB. The scenarios assume usage remains inside the shared free tier.
@@ -392,15 +487,15 @@ support, and tax:
 
 | Scenario | Fargate Spot + IPv4 | Persistent EFS/ECR + logs/DNS | USD before tax | Estimated BRL after tax |
 |---|---:|---:|---:|---:|
-| One 4-hour session in a month | 0.0468 | 0.9149 | 0.9617 | R$5.49 |
-| 4 hours/day for 30 days | 1.4040 | 0.9149 | 2.3189 | R$13.24 |
-| Continuously running for 730 hours | 8.5411 | 0.9149 | 9.4560 | R$54.00 |
+| One 4-hour session in a month | 0.0468 | 0.9260 | 0.9728 | R$5.56 |
+| 4 hours/day for 30 days | 1.4040 | 0.9260 | 2.3300 | R$13.31 |
+| Continuously running for 730 hours | 8.5411 | 0.9260 | 9.4671 | R$54.06 |
 
-The persistent subtotal is `1 GiB EFS + 0.2 GiB ECR + 0.1 GiB log ingestion +
-approximately 0.023 GiB-month retained log storage + one Route 53 hosted
-zone`. It is a planning example, not a spending cap. File transfers, larger
-EFS state, accumulated CDK assets, manual resources, and usage of the shared
-free egress allowance can dominate the bill.
+The non-compute subtotal is `1 GiB EFS + 0.3 GiB ECR + 0.1 GiB log ingestion +
+approximately 0.023 GiB-month retained log storage + one Route 53 hosted zone
++ 300 REST API calls`. It is a planning example, not a spending cap. File
+transfers, larger EFS state, accumulated CDK assets, manual resources, and usage
+of shared free allowances can dominate the bill.
 
 Official references:
 
@@ -417,6 +512,8 @@ Official references:
 - [Route 53 DNSSEC migration guidance](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/hosted-zones-migrating.html)
 - [Registro.br domain and DNS guidance](https://registro.br/ajuda/registro-de-novos-dominios/)
 - [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/)
+- [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
+- [API Gateway usage-plan and API-key guidance](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-api-usage-plans.html)
 - [Amazon EventBridge pricing](https://aws.amazon.com/eventbridge/pricing/)
 - [Public IPv4 pricing](https://aws.amazon.com/vpc/pricing/)
 - [EC2 internet data-transfer pricing](https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer)
@@ -428,9 +525,10 @@ stored data, image size, logging, or transfer assumptions change.
 
 ## Deferred work and recovery limits
 
-Deferred work includes start/stop Lambdas, CI/CD, Route 53 DNSSEC signing,
-backups and tested restore, monitoring alarms, and automated budget controls.
-None is implied by the current stack.
+Deferred work includes stronger management authorization, browser/CORS
+support, event-triggered lifecycle wiring, durable lifecycle history, CI/CD,
+Route 53 DNSSEC signing, backups and tested restore, monitoring alarms, and
+automated budget controls. None is implied by the current stack.
 
 Retained EFS survives service stops, task replacements, and stack deletion, but
 recovery is manual and the data has no backup. Existing manually created

@@ -6,6 +6,7 @@ import (
 
 	"aws/storage"
 	"aws/teamspeak6"
+
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/jsii-runtime-go"
 )
@@ -38,6 +39,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	managementImageAssetDirectory, err := filepath.Abs(
+		filepath.Join("..", "..", "apps", "ts6-management"),
+	)
+	if err != nil {
+		panic(err)
+	}
 	teamspeak6.NewStack(
 		app,
 		"PersonalPlatformTeamspeak6Stack",
@@ -49,6 +56,7 @@ func main() {
 			},
 			ImageAssetDirectory:           imageAssetDirectory,
 			DNSUpdaterImageAssetDirectory: dnsUpdaterImageAssetDirectory,
+			ManagementImageAssetDirectory: managementImageAssetDirectory,
 		},
 	)
 

@@ -21,10 +21,13 @@ Docker image is built from `apps/ts6` and published as a CDK ECR asset. A
 separate reusable Go Lambda container asset is built from `apps/dns-updater`;
 an EventBridge rule invokes the TeamSpeak-configured deployment when its ECS
 task reaches `RUNNING`, keeping `ts.diogo-nb.com.br` in the retained Route 53
-public hosted zone pointed at the current task's dynamic public IPv4. Read the
-application runbook before synthesis or operation; it includes automatic
-license acceptance, one-time registrar delegation, DNS updates, the scaling
-contract, and data-recovery limits.
+public hosted zone pointed at the current task's dynamic public IPv4. A third
+Go Lambda container asset is built from `apps/ts6-management` and exposed only
+through an API-key-protected API Gateway REST API for singleton start, stop,
+and status operations. Read the application runbook before synthesis or
+operation; it includes automatic license acceptance, one-time registrar
+delegation, DNS updates, management-key retrieval, the scaling contract, and
+data-recovery limits.
 
 ## Cost allocation tags
 
@@ -63,6 +66,12 @@ after seven days, and expired delete markers are removed.
 
 ```sh
 cd ../../apps/dns-updater
+go mod verify
+go test -race ./...
+go vet ./...
+go build ./...
+
+cd ../ts6-management
 go mod verify
 go test -race ./...
 go vet ./...

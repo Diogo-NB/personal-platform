@@ -7,6 +7,7 @@ import (
 	"aws/internal/costtags"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awsapigateway"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsec2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsecrassets"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsecs"
@@ -35,6 +36,7 @@ type StackProps struct {
 	awscdk.StackProps
 	ImageAssetDirectory           string
 	DNSUpdaterImageAssetDirectory string
+	ManagementImageAssetDirectory string
 }
 
 type stackOutputResources struct {
@@ -45,6 +47,8 @@ type stackOutputResources struct {
 	securityGroup awsec2.SecurityGroup
 	logGroup      awslogs.LogGroup
 	hostedZone    awsroute53.PublicHostedZone
+	managementAPI awsapigateway.RestApi
+	managementKey awsapigateway.IApiKey
 }
 
 // NewStack creates the TeamSpeak 6 Fargate service with license acceptance
@@ -58,6 +62,9 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 	}
 	if props.DNSUpdaterImageAssetDirectory == "" {
 		panic("teamspeak6: dns updater image asset directory is required")
+	}
+	if props.ManagementImageAssetDirectory == "" {
+		panic("teamspeak6: management image asset directory is required")
 	}
 
 	stackProps := props.StackProps
@@ -290,6 +297,12 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		},
 	))
 	service.Node().AddDependency(dnsUpdateRule)
+	management := newManagementAPI(
+		stack,
+		cluster,
+		service,
+		props.ManagementImageAssetDirectory,
+	)
 
 	newOutputs(stack, stackOutputResources{
 		cluster:       cluster,
@@ -299,9 +312,133 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		securityGroup: taskSecurityGroup,
 		logGroup:      logGroup,
 		hostedZone:    hostedZone,
+		managementAPI: management.api,
+		managementKey: management.key,
 	})
 
 	return stack
+}
+
+type managementResources struct {
+	api awsapigateway.RestApi
+	key awsapigateway.IApiKey
+}
+
+func newManagementAPI(
+	stack awscdk.Stack,
+	cluster awsecs.Cluster,
+	service awsecs.FargateService,
+	imageAssetDirectory string,
+) managementResources {
+	logGroup := awslogs.NewLogGroup(stack, jsii.String("ManagementLogGroup"), &awslogs.LogGroupProps{
+		LogGroupName:  jsii.String("/personal-platform/teamspeak6/management"),
+		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
+		Retention:     awslogs.RetentionDays_ONE_WEEK,
+	})
+	function := awslambda.NewDockerImageFunction(
+		stack,
+		jsii.String("ManagementFunction"),
+		&awslambda.DockerImageFunctionProps{
+			Architecture: awslambda.Architecture_X86_64(),
+			Code: awslambda.DockerImageCode_FromImageAsset(
+				jsii.String(imageAssetDirectory),
+				&awslambda.AssetImageCodeProps{
+					Platform: awsecrassets.Platform_LINUX_AMD64(),
+				},
+			),
+			Description: jsii.String("Start, stop, and report status for the singleton TeamSpeak service"),
+			Environment: &map[string]*string{
+				"CLUSTER_ARN":  cluster.ClusterArn(),
+				"SERVICE_NAME": service.ServiceName(),
+			},
+			FunctionName: jsii.String("personal-platform-teamspeak6-management"),
+			LogGroup:     logGroup,
+			MemorySize:   jsii.Number(128),
+			Timeout:      awscdk.Duration_Seconds(jsii.Number(15)),
+		},
+	)
+	function.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions: &[]*string{
+			jsii.String("ecs:DescribeServices"),
+			jsii.String("ecs:UpdateService"),
+		},
+		Resources: &[]*string{service.ServiceArn()},
+	}))
+	function.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions: &[]*string{jsii.String("ecs:ListTasks")},
+		Conditions: &map[string]interface{}{
+			"ArnEquals": map[string]interface{}{
+				"ecs:cluster": cluster.ClusterArn(),
+			},
+		},
+		Resources: &[]*string{jsii.String("*")},
+	}))
+	taskARN := stack.FormatArn(&awscdk.ArnComponents{
+		ArnFormat:    awscdk.ArnFormat_SLASH_RESOURCE_NAME,
+		Resource:     jsii.String("task"),
+		ResourceName: awscdk.Fn_Join(jsii.String(""), &[]*string{cluster.ClusterName(), jsii.String("/*")}),
+		Service:      jsii.String("ecs"),
+	})
+	function.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
+		Actions:   &[]*string{jsii.String("ecs:DescribeTasks")},
+		Resources: &[]*string{taskARN},
+	}))
+
+	api := awsapigateway.NewRestApi(stack, jsii.String("ManagementAPI"), &awsapigateway.RestApiProps{
+		ApiKeySourceType: awsapigateway.ApiKeySourceType_HEADER,
+		CloudWatchRole:   jsii.Bool(false),
+		DeployOptions: &awsapigateway.StageOptions{
+			DataTraceEnabled: jsii.Bool(false),
+			LoggingLevel:     awsapigateway.MethodLoggingLevel_OFF,
+			StageName:        jsii.String("prod"),
+		},
+		Description: jsii.String("TeamSpeak singleton lifecycle management API"),
+		EndpointTypes: &[]awsapigateway.EndpointType{
+			awsapigateway.EndpointType_REGIONAL,
+		},
+		RestApiName: jsii.String("personal-platform-teamspeak6-management"),
+	})
+	api.Node().TryRemoveChild(jsii.String("Endpoint"))
+	integration := awsapigateway.NewLambdaIntegration(function, nil)
+	methodOptions := &awsapigateway.MethodOptions{
+		ApiKeyRequired:    jsii.Bool(true),
+		AuthorizationType: awsapigateway.AuthorizationType_NONE,
+	}
+	api.Root().AddResource(jsii.String("start"), nil).AddMethod(
+		jsii.String("POST"),
+		integration,
+		methodOptions,
+	)
+	api.Root().AddResource(jsii.String("stop"), nil).AddMethod(
+		jsii.String("POST"),
+		integration,
+		methodOptions,
+	)
+	api.Root().AddResource(jsii.String("status"), nil).AddMethod(
+		jsii.String("GET"),
+		integration,
+		methodOptions,
+	)
+
+	key := api.AddApiKey(jsii.String("ManagementAPIKey"), &awsapigateway.ApiKeyOptions{
+		ApiKeyName:  jsii.String("personal-platform-teamspeak6-management"),
+		Description: jsii.String("Private key for the TeamSpeak lifecycle management API"),
+	})
+	usagePlan := api.AddUsagePlan(jsii.String("ManagementUsagePlan"), &awsapigateway.UsagePlanProps{
+		Description: jsii.String("Low-rate access to TeamSpeak lifecycle operations"),
+		Name:        jsii.String("personal-platform-teamspeak6-management"),
+		Throttle: &awsapigateway.ThrottleSettings{
+			BurstLimit: jsii.Number(5),
+			RateLimit:  jsii.Number(2),
+		},
+	})
+	usagePlan.AddApiStage(&awsapigateway.UsagePlanPerApiStage{
+		Api:   api,
+		Stage: api.DeploymentStage(),
+	})
+	usagePlan.AddApiKey(key, nil)
+
+	return managementResources{api: api, key: key}
 }
 
 func newDNSUpdater(
@@ -432,6 +569,16 @@ func newOutputs(stack awscdk.Stack, resources stackOutputResources) {
 			id:          "TeamSpeakAddress",
 			value:       jsii.String(dnsRecordName),
 			description: "Friendly TeamSpeak server address",
+		},
+		{
+			id:          "ManagementAPIURL",
+			value:       resources.managementAPI.Url(),
+			description: "TeamSpeak management API prod-stage URL",
+		},
+		{
+			id:          "ManagementAPIKeyID",
+			value:       resources.managementKey.KeyId(),
+			description: "API key ID used to retrieve the private key value",
 		},
 	}
 
