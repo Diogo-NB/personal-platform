@@ -39,8 +39,9 @@ runbook. The CDK implementation is in `../../infra/aws/teamspeak6`.
   Compose service. Do not require a CDK context flag or shell environment
   variable for license acceptance.
 - Tag every taggable resource with `Project=personal-platform`,
-  `Application=teamspeak6`, and `Environment=production`. Propagate the service
-  tags to Fargate tasks.
+  `Application=teamspeak6`, and `Environment=production`. Add exactly one
+  `Component` tag with value `server`, `management-api`, or `management-web`.
+  Propagate the server tags to Fargate tasks.
 
 Do not change these decisions silently. Update the README and obtain user
 agreement before a material architecture, persistence, security, recovery, or

@@ -39,8 +39,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	managementImageAssetDirectory, err := filepath.Abs(
-		filepath.Join("..", "..", "apps", "ts6-management"),
+	managementAPIImageAssetDirectory, err := filepath.Abs(
+		filepath.Join("..", "..", "apps", "ts6-management-api"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	managementWebDirectory, err := filepath.Abs(
+		filepath.Join("..", "..", "apps", "ts6-management-web", "dist"),
 	)
 	if err != nil {
 		panic(err)
@@ -54,9 +60,10 @@ func main() {
 					Region: jsii.String("sa-east-1"),
 				},
 			},
-			ImageAssetDirectory:           imageAssetDirectory,
-			DNSUpdaterImageAssetDirectory: dnsUpdaterImageAssetDirectory,
-			ManagementImageAssetDirectory: managementImageAssetDirectory,
+			ImageAssetDirectory:              imageAssetDirectory,
+			DNSUpdaterImageAssetDirectory:    dnsUpdaterImageAssetDirectory,
+			ManagementAPIImageAssetDirectory: managementAPIImageAssetDirectory,
+			ManagementWebDirectory:           managementWebDirectory,
 		},
 	)
 

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src https://*.execute-api.sa-east-1.amazonaws.com http://localhost:8080; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" content="#0b1115" />
+    <title>TeamSpeak Control</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script src="/runtime-config.js"></script>
+  </head>
+  <body>
+    <main id="app"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

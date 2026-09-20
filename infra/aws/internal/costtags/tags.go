@@ -5,6 +5,7 @@ import (
 	"maps"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
+	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
 )
 
@@ -13,6 +14,12 @@ const (
 	ApplicationSkycrate = "skycrate"
 	// ApplicationTeamSpeak6 identifies resources used by the TeamSpeak 6 application.
 	ApplicationTeamSpeak6 = "teamspeak6"
+	// ComponentServer identifies the TeamSpeak server and its supporting resources.
+	ComponentServer = "server"
+	// ComponentManagementAPI identifies the TeamSpeak lifecycle API resources.
+	ComponentManagementAPI = "management-api"
+	// ComponentManagementWeb identifies the TeamSpeak browser application resources.
+	ComponentManagementWeb = "management-web"
 )
 
 const project = "personal-platform"
@@ -38,6 +45,11 @@ func Apply(stack awscdk.Stack, application string) {
 	for key, value := range values(application) {
 		awscdk.Tags_Of(stack).Add(jsii.String(key), jsii.String(value), nil)
 	}
+}
+
+// ApplyComponent adds the component dimension to a construct and its taggable descendants.
+func ApplyComponent(scope constructs.IConstruct, component string) {
+	awscdk.Tags_Of(scope).Add(jsii.String("Component"), jsii.String(component), nil)
 }
 
 func values(application string) map[string]string {

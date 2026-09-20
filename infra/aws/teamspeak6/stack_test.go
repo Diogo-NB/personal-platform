@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"aws/internal/costtags"
+
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/assertions"
 	"github.com/aws/jsii-runtime-go"
@@ -276,7 +278,7 @@ func TestNewStackTemplate(t *testing.T) {
 					"SERVICE_NAME": assertions.Match_AnyValue(),
 				},
 			},
-			"FunctionName":                 "personal-platform-teamspeak6-management",
+			"FunctionName":                 "personal-platform-teamspeak6-management-api",
 			"Handler":                      assertions.Match_Absent(),
 			"MemorySize":                   float64(128),
 			"PackageType":                  "Image",
@@ -285,10 +287,9 @@ func TestNewStackTemplate(t *testing.T) {
 			"Timeout":                      float64(15),
 		})
 		template.HasResourceProperties(jsii.String("AWS::Logs::LogGroup"), map[string]any{
-			"LogGroupName":    "/personal-platform/teamspeak6/management",
+			"LogGroupName":    "/personal-platform/teamspeak6/management-api",
 			"RetentionInDays": float64(7),
 		})
-		template.ResourceCountIs(jsii.String("AWS::Lambda::Function"), jsii.Number(2))
 		template.HasResourceProperties(jsii.String("AWS::SQS::Queue"), map[string]any{
 			"ContentBasedDeduplication": true,
 			"FifoQueue":                 true,
@@ -312,12 +313,12 @@ func TestNewStackTemplate(t *testing.T) {
 			"BatchSize": float64(1),
 			"EventSourceArn": map[string]any{
 				"Fn::GetAtt": []any{
-					assertions.Match_StringLikeRegexp(jsii.String("ManagementCommandQueue.*")),
+					assertions.Match_StringLikeRegexp(jsii.String("ManagementAPICommandQueue.*")),
 					"Arn",
 				},
 			},
 			"FunctionName": map[string]any{
-				"Ref": assertions.Match_StringLikeRegexp(jsii.String("ManagementFunction.*")),
+				"Ref": assertions.Match_StringLikeRegexp(jsii.String("ManagementAPIFunction.*")),
 			},
 			"FunctionResponseTypes": []any{"ReportBatchItemFailures"},
 		})
@@ -329,7 +330,7 @@ func TestNewStackTemplate(t *testing.T) {
 			"EndpointConfiguration": map[string]any{
 				"Types": []any{"REGIONAL"},
 			},
-			"Name": "personal-platform-teamspeak6-management",
+			"Name": "personal-platform-teamspeak6-management-api",
 		})
 		template.HasResourceProperties(jsii.String("AWS::ApiGateway::Stage"), map[string]any{
 			"StageName": "prod",
@@ -337,7 +338,7 @@ func TestNewStackTemplate(t *testing.T) {
 		template.ResourceCountIs(jsii.String("AWS::ApiGateway::Stage"), jsii.Number(1))
 		template.HasResourceProperties(jsii.String("AWS::ApiGateway::ApiKey"), map[string]any{
 			"Enabled": true,
-			"Name":    "personal-platform-teamspeak6-management",
+			"Name":    "personal-platform-teamspeak6-management-api",
 			"Value":   assertions.Match_Absent(),
 		})
 		template.HasResourceProperties(jsii.String("AWS::ApiGateway::UsagePlan"), map[string]any{
@@ -352,7 +353,7 @@ func TestNewStackTemplate(t *testing.T) {
 				"BurstLimit": float64(5),
 				"RateLimit":  float64(2),
 			},
-			"UsagePlanName": "personal-platform-teamspeak6-management",
+			"UsagePlanName": "personal-platform-teamspeak6-management-api",
 		})
 		template.HasResourceProperties(jsii.String("AWS::ApiGateway::UsagePlanKey"), map[string]any{
 			"KeyId":       assertions.Match_AnyValue(),
@@ -360,6 +361,16 @@ func TestNewStackTemplate(t *testing.T) {
 			"UsagePlanId": assertions.Match_AnyValue(),
 		})
 		template.ResourceCountIs(jsii.String("AWS::ApiGateway::UsagePlanKey"), jsii.Number(1))
+		template.ResourceCountIs(jsii.String("AWS::ApiGateway::Method"), jsii.Number(6))
+		template.ResourceCountIs(jsii.String("AWS::ApiGateway::GatewayResponse"), jsii.Number(2))
+		for _, responseType := range []string{"DEFAULT_4XX", "DEFAULT_5XX"} {
+			template.HasResourceProperties(jsii.String("AWS::ApiGateway::GatewayResponse"), map[string]any{
+				"ResponseParameters": map[string]any{
+					"gatewayresponse.header.Access-Control-Allow-Origin": "'*'",
+				},
+				"ResponseType": responseType,
+			})
+		}
 
 		expectedRoutes := map[string]apiRoute{
 			"start":  {method: "POST", apiKeyRequired: true},
@@ -368,6 +379,10 @@ func TestNewStackTemplate(t *testing.T) {
 		}
 		if got := apiRoutes(t, template); !reflect.DeepEqual(got, expectedRoutes) {
 			t.Errorf("API routes = %#v, want %#v", got, expectedRoutes)
+		}
+		expectedPreflightPaths := []string{"start", "status", "stop"}
+		if got := apiPreflightPaths(t, template); !reflect.DeepEqual(got, expectedPreflightPaths) {
+			t.Errorf("API preflight paths = %v, want %v", got, expectedPreflightPaths)
 		}
 
 		expectedActions := []string{
@@ -426,6 +441,83 @@ func TestNewStackTemplate(t *testing.T) {
 		assertDistinctApplicationImageAssets(t, template)
 	})
 
+	t.Run("private management web hosting", func(t *testing.T) {
+		template.HasResourceProperties(jsii.String("AWS::S3::Bucket"), map[string]any{
+			"BucketEncryption": map[string]any{
+				"ServerSideEncryptionConfiguration": []any{
+					map[string]any{
+						"ServerSideEncryptionByDefault": map[string]any{
+							"SSEAlgorithm": "AES256",
+						},
+					},
+				},
+			},
+			"PublicAccessBlockConfiguration": map[string]any{
+				"BlockPublicAcls":       true,
+				"BlockPublicPolicy":     true,
+				"IgnorePublicAcls":      true,
+				"RestrictPublicBuckets": true,
+			},
+			"WebsiteConfiguration": assertions.Match_Absent(),
+		})
+		template.ResourceCountIs(jsii.String("AWS::CloudFront::OriginAccessControl"), jsii.Number(1))
+		template.HasResourceProperties(jsii.String("AWS::CloudFront::OriginAccessControl"), map[string]any{
+			"OriginAccessControlConfig": map[string]any{
+				"OriginAccessControlOriginType": "s3",
+				"SigningBehavior":               "always",
+				"SigningProtocol":               "sigv4",
+			},
+		})
+		template.HasResourceProperties(jsii.String("AWS::CloudFront::Distribution"), map[string]any{
+			"DistributionConfig": map[string]any{
+				"DefaultCacheBehavior": map[string]any{
+					"AllowedMethods":       []any{"GET", "HEAD", "OPTIONS"},
+					"Compress":             true,
+					"ViewerProtocolPolicy": "redirect-to-https",
+				},
+				"DefaultRootObject": "index.html",
+				"Enabled":           true,
+				"Origins": assertions.Match_ArrayWith(&[]any{
+					assertions.Match_ObjectLike(&map[string]any{
+						"OriginAccessControlId": assertions.Match_AnyValue(),
+						"S3OriginConfig": map[string]any{
+							"OriginAccessIdentity": "",
+						},
+					}),
+				}),
+			},
+		})
+		template.HasResourceProperties(jsii.String("AWS::S3::BucketPolicy"), map[string]any{
+			"PolicyDocument": map[string]any{
+				"Statement": assertions.Match_ArrayWith(&[]any{
+					assertions.Match_ObjectLike(&map[string]any{
+						"Action": "s3:GetObject",
+						"Condition": map[string]any{
+							"StringEquals": map[string]any{
+								"AWS:SourceArn": assertions.Match_AnyValue(),
+							},
+						},
+						"Effect": "Allow",
+						"Principal": map[string]any{
+							"Service": "cloudfront.amazonaws.com",
+						},
+					}),
+				}),
+			},
+		})
+		template.ResourceCountIs(jsii.String("Custom::CDKBucketDeployment"), jsii.Number(1))
+		template.ResourceCountIs(jsii.String("Custom::S3AutoDeleteObjects"), jsii.Number(0))
+		template.HasResourceProperties(jsii.String("Custom::CDKBucketDeployment"), map[string]any{
+			"DistributionId": assertions.Match_AnyValue(),
+			"DistributionPaths": []any{
+				"/*",
+			},
+			"SourceBucketNames": assertions.Match_AnyValue(),
+			"SourceObjectKeys":  assertions.Match_AnyValue(),
+			"RetainOnDelete":    false,
+		})
+	})
+
 	t.Run("tags and outputs", func(t *testing.T) {
 		assertCostAllocationTags(t, template, "teamspeak6")
 
@@ -441,9 +533,10 @@ func TestNewStackTemplate(t *testing.T) {
 			"TeamSpeakAddress",
 			"ManagementAPIURL",
 			"ManagementAPIKeyID",
-			"ManagementCommandQueueURL",
-			"ManagementCommandQueueARN",
-			"ManagementCommandDLQURL",
+			"ManagementWebURL",
+			"ManagementAPICommandQueueURL",
+			"ManagementAPICommandQueueARN",
+			"ManagementAPICommandDLQURL",
 		}
 		for _, output := range expectedOutputs {
 			template.HasOutput(jsii.String(output), map[string]any{
@@ -497,26 +590,38 @@ func TestNewStackRequiresImageAssetDirectories(t *testing.T) {
 		{
 			name: "missing server image directory",
 			props: &StackProps{
-				DNSUpdaterImageAssetDirectory: "/tmp/dns-updater",
-				ManagementImageAssetDirectory: "/tmp/management",
+				DNSUpdaterImageAssetDirectory:    "/tmp/dns-updater",
+				ManagementAPIImageAssetDirectory: "/tmp/management-api",
+				ManagementWebDirectory:           "/tmp/management-web",
 			},
 			panicMatch: "image asset directory is required",
 		},
 		{
 			name: "missing dns updater image directory",
 			props: &StackProps{
-				ImageAssetDirectory:           "/tmp/teamspeak6",
-				ManagementImageAssetDirectory: "/tmp/management",
+				ImageAssetDirectory:              "/tmp/teamspeak6",
+				ManagementAPIImageAssetDirectory: "/tmp/management-api",
+				ManagementWebDirectory:           "/tmp/management-web",
 			},
 			panicMatch: "dns updater image asset directory is required",
 		},
 		{
-			name: "missing management image directory",
+			name: "missing management api image directory",
 			props: &StackProps{
 				ImageAssetDirectory:           "/tmp/teamspeak6",
 				DNSUpdaterImageAssetDirectory: "/tmp/dns-updater",
+				ManagementWebDirectory:        "/tmp/management-web",
 			},
-			panicMatch: "management image asset directory is required",
+			panicMatch: "management api image asset directory is required",
+		},
+		{
+			name: "missing management web directory",
+			props: &StackProps{
+				ImageAssetDirectory:              "/tmp/teamspeak6",
+				DNSUpdaterImageAssetDirectory:    "/tmp/dns-updater",
+				ManagementAPIImageAssetDirectory: "/tmp/management-api",
+			},
+			panicMatch: "management web directory is required",
 		},
 	}
 
@@ -552,6 +657,7 @@ func assertCostAllocationTags(
 		"AWS::ApiGateway::RestApi":        "Tags",
 		"AWS::ApiGateway::Stage":          "Tags",
 		"AWS::ApiGateway::UsagePlan":      "Tags",
+		"AWS::CloudFront::Distribution":   "Tags",
 		"AWS::EC2::InternetGateway":       "Tags",
 		"AWS::EC2::RouteTable":            "Tags",
 		"AWS::EC2::SecurityGroup":         "Tags",
@@ -568,6 +674,7 @@ func assertCostAllocationTags(
 		"AWS::Lambda::Function":           "Tags",
 		"AWS::Logs::LogGroup":             "Tags",
 		"AWS::Route53::HostedZone":        "HostedZoneTags",
+		"AWS::S3::Bucket":                 "Tags",
 		"AWS::SQS::Queue":                 "Tags",
 	}
 	expected := map[string]string{
@@ -613,6 +720,7 @@ func assertCostAllocationTags(
 				actual[key] = value
 			}
 		}
+		expected["Component"] = expectedComponent(logicalID)
 
 		for key, expectedValue := range expected {
 			if actual[key] != expectedValue {
@@ -640,6 +748,18 @@ func assertCostAllocationTags(
 	}
 }
 
+func expectedComponent(logicalID string) string {
+	switch {
+	case strings.HasPrefix(logicalID, "ManagementAPI"):
+		return costtags.ComponentManagementAPI
+	case strings.HasPrefix(logicalID, "ManagementWeb"),
+		strings.HasPrefix(logicalID, "CustomCDKBucketDeployment"):
+		return costtags.ComponentManagementWeb
+	default:
+		return costtags.ComponentServer
+	}
+}
+
 type ingressRule struct {
 	protocol string
 	fromPort int
@@ -663,9 +783,10 @@ func newTemplate(t *testing.T) assertions.Template {
 				Region:  jsii.String("sa-east-1"),
 			},
 		},
-		ImageAssetDirectory:           imageAssetDirectory(t),
-		DNSUpdaterImageAssetDirectory: dnsUpdaterImageAssetDirectory(t),
-		ManagementImageAssetDirectory: managementImageAssetDirectory(t),
+		ImageAssetDirectory:              imageAssetDirectory(t),
+		DNSUpdaterImageAssetDirectory:    dnsUpdaterImageAssetDirectory(t),
+		ManagementAPIImageAssetDirectory: managementAPIImageAssetDirectory(t),
+		ManagementWebDirectory:           managementWebDirectory(t),
 	})
 
 	return assertions.Template_FromStack(stack, nil)
@@ -684,14 +805,29 @@ func dnsUpdaterImageAssetDirectory(t *testing.T) string {
 	return directory
 }
 
-func managementImageAssetDirectory(t *testing.T) string {
+func managementAPIImageAssetDirectory(t *testing.T) string {
 	t.Helper()
 
 	directory, err := filepath.Abs(
-		filepath.Join("..", "..", "..", "apps", "ts6-management"),
+		filepath.Join("..", "..", "..", "apps", "ts6-management-api"),
 	)
 	if err != nil {
 		t.Fatalf("resolve management image asset directory: %v", err)
+	}
+
+	return directory
+}
+
+func managementWebDirectory(t *testing.T) string {
+	t.Helper()
+
+	directory := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(directory, "index.html"),
+		[]byte("<!doctype html><title>TeamSpeak Control</title>"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write management web test asset: %v", err)
 	}
 
 	return directory
@@ -731,7 +867,7 @@ func assertDistinctApplicationImageAssets(t *testing.T, template assertions.Temp
 	}
 
 	updaterImage := lambdaImages["personal-platform-teamspeak6-dns-updater"]
-	managementImage := lambdaImages["personal-platform-teamspeak6-management"]
+	managementImage := lambdaImages["personal-platform-teamspeak6-management-api"]
 	if serverImage == nil || updaterImage == nil || managementImage == nil {
 		t.Fatalf(
 			"image assets = server %#v, updater %#v, management %#v",
@@ -781,6 +917,9 @@ func apiRoutes(t *testing.T, template assertions.Template) map[string]apiRoute {
 		logicalID, _ := resourceID["Ref"].(string)
 		path := pathsByLogicalID[logicalID]
 		method, _ := properties["HttpMethod"].(string)
+		if method == "OPTIONS" {
+			continue
+		}
 		apiKeyRequired, _ := properties["ApiKeyRequired"].(bool)
 		authorizationType, _ := properties["AuthorizationType"].(string)
 		if authorizationType != "NONE" {
@@ -790,6 +929,68 @@ func apiRoutes(t *testing.T, template assertions.Template) map[string]apiRoute {
 	}
 
 	return routes
+}
+
+func apiPreflightPaths(t *testing.T, template assertions.Template) []string {
+	t.Helper()
+
+	resources, ok := (*template.ToJSON())["Resources"].(map[string]any)
+	if !ok {
+		t.Fatal("template Resources is not an object")
+	}
+
+	pathsByLogicalID := map[string]string{}
+	for logicalID, resourceValue := range resources {
+		resource, ok := resourceValue.(map[string]any)
+		if !ok || resource["Type"] != "AWS::ApiGateway::Resource" {
+			continue
+		}
+		properties, _ := resource["Properties"].(map[string]any)
+		path, _ := properties["PathPart"].(string)
+		pathsByLogicalID[logicalID] = path
+	}
+
+	var paths []string
+	for _, resourceValue := range resources {
+		resource, ok := resourceValue.(map[string]any)
+		if !ok || resource["Type"] != "AWS::ApiGateway::Method" {
+			continue
+		}
+		properties, _ := resource["Properties"].(map[string]any)
+		method, _ := properties["HttpMethod"].(string)
+		if method != "OPTIONS" {
+			continue
+		}
+		if required, _ := properties["ApiKeyRequired"].(bool); required {
+			t.Error("preflight unexpectedly requires an API key")
+		}
+		integration, _ := properties["Integration"].(map[string]any)
+		if integration["Type"] != "MOCK" {
+			t.Errorf("preflight integration type = %v, want MOCK", integration["Type"])
+		}
+		integrationResponses, _ := integration["IntegrationResponses"].([]any)
+		if len(integrationResponses) != 1 {
+			t.Errorf("preflight integration responses = %d, want 1", len(integrationResponses))
+		} else {
+			response, _ := integrationResponses[0].(map[string]any)
+			parameters, _ := response["ResponseParameters"].(map[string]any)
+			if parameters["method.response.header.Access-Control-Allow-Origin"] != "'*'" {
+				t.Errorf("preflight allow origin = %v, want '*'", parameters["method.response.header.Access-Control-Allow-Origin"])
+			}
+			if parameters["method.response.header.Access-Control-Allow-Headers"] != "'X-Api-Key'" {
+				t.Errorf("preflight allow headers = %v, want 'X-Api-Key'", parameters["method.response.header.Access-Control-Allow-Headers"])
+			}
+			if parameters["method.response.header.Access-Control-Allow-Methods"] != "'GET,POST'" {
+				t.Errorf("preflight allow methods = %v, want 'GET,POST'", parameters["method.response.header.Access-Control-Allow-Methods"])
+			}
+		}
+		resourceID, _ := properties["ResourceId"].(map[string]any)
+		logicalID, _ := resourceID["Ref"].(string)
+		paths = append(paths, pathsByLogicalID[logicalID])
+	}
+
+	sort.Strings(paths)
+	return paths
 }
 
 func ecsIAMActions(t *testing.T, template assertions.Template) []string {

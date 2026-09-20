@@ -22,9 +22,12 @@ separate reusable Go Lambda container asset is built from `apps/dns-updater`;
 an EventBridge rule invokes the TeamSpeak-configured deployment when its ECS
 task reaches `RUNNING`, keeping `ts.diogo-nb.com.br` in the retained Route 53
 public hosted zone pointed at the current task's dynamic public IPv4. A third
-Go Lambda container asset is built from `apps/ts6-management` and exposed only
-through an API-key-protected API Gateway REST API for singleton start, stop,
-and status operations. Read the application runbook before synthesis or
+Go Lambda container asset is built from `apps/ts6-management-api` and exposed
+only through an API-key-protected API Gateway REST API for singleton start,
+stop, and status operations. The independent Vite app is deployed from
+`apps/ts6-management-web/dist` to a private S3 bucket and served through
+CloudFront with Origin Access Control. The browser calls API Gateway directly.
+Read the application runbook before synthesis or
 operation; it includes automatic license acceptance, one-time registrar
 delegation, DNS updates, management-key retrieval, the scaling contract, and
 data-recovery limits.
@@ -38,11 +41,12 @@ taggable resource:
 |---|---|---|---|
 | `Project` | `personal-platform` | `personal-platform` | Aggregate the complete project cost. |
 | `Application` | `skycrate` | `teamspeak6` | Split costs by application. |
+| `Component` | Not set | `server`, `management-api`, or `management-web` | Split TeamSpeak costs by deployable component. |
 | `Environment` | `production` | `production` | Separate long-lived and future non-production resources. |
 
-The TeamSpeak service propagates its tags to Fargate tasks and enables
-ECS-managed tags. After deployment, [activate at least `Project`, `Application`,
-and `Environment`](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/activating-tags.html)
+The TeamSpeak service propagates its server tags to Fargate tasks and enables
+ECS-managed tags. After deployment, [activate `Project`, `Application`,
+`Component`, and `Environment`](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/activating-tags.html)
 under Billing and Cost Management > Cost allocation tags. AWS can take up to
 24 hours to list a new tag key and another 24 hours to activate it. Cost
 allocation is not retroactive.
@@ -71,13 +75,18 @@ go test -race ./...
 go vet ./...
 go build ./...
 
-cd ../ts6-management
+cd ../ts6-management-api
 go mod verify
 go test -race ./...
 go vet ./...
 go build ./...
 
-cd ../../infra/aws
+cd ../ts6-management-web
+npm ci
+npm test
+npm run build
+
+cd ../../../infra/aws
 go test ./...
 go vet ./...
 go build ./...

@@ -41,6 +41,10 @@ Command sender --> encrypted SQS FIFO queue -------------+
                                                | start / stop / status
                                                v
                                             ECS service
+
+Browser --> CloudFront -- OAC --> private S3 web app
+   |
+   `------ x-api-key -------> API Gateway REST API (prod)
 ```
 
 The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
@@ -62,14 +66,18 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   stopping, and reporting the status of the singleton ECS service. All three
   public methods require a generated API key and share a two-request/second,
   burst-five usage plan.
+- A private, encrypted, public-access-blocked S3 bucket and CloudFront
+  distribution for the management SPA. CloudFront uses Origin Access Control,
+  redirects viewers to HTTPS, and serves no API routes.
 - An encrypted FIFO lifecycle-command queue and encrypted FIFO dead-letter
   queue. The command queue directly invokes the same management Lambda with a
   batch size of one and partial-batch failure reporting.
 
 Every taggable resource uses `Project=personal-platform`,
-`Application=teamspeak6`, and `Environment=production`. The ECS service
-propagates these tags to each Fargate task so compute can be grouped by
-application in AWS billing reports.
+`Application=teamspeak6`, and `Environment=production`. A `Component` tag
+separates `server`, `management-api`, and `management-web` costs while retaining
+the shared TeamSpeak application family. The ECS service propagates the server
+tags to each Fargate task.
 
 There is no load balancer, Elastic IP, NAT Gateway, ECS Exec, SSH, RDS,
 external MariaDB, or public query interface. DNS changes only how clients find
@@ -79,8 +87,11 @@ SSH (`10022`), HTTP (`10080`), and HTTPS (`10443`) are disabled in
 `tsserver.yaml` and have no ingress rules.
 
 The management API uses the default API Gateway execute-api hostname. It has no
-custom domain, Route 53 record, CORS policy, Lambda Function URL, or browser
-client. An API key is lightweight access control and request metering, not
+custom domain, Route 53 record, Lambda Function URL, or CloudFront proxy. The
+browser client calls that hostname directly. Gin and API Gateway preflight
+handlers allow all browser origins for v1 without credentials, and gateway
+4xx/5xx responses include the wildcard origin so the SPA can read failures.
+An API key is lightweight access control and request metering, not
 strong authentication or authorization. AWS recommends stronger authorization
 for sensitive APIs; this limitation is accepted for the initial private v1.
 The Lambda Web Adapter's private `POST /internal/events` pass-through route is
@@ -132,13 +143,19 @@ environment, EventBridge filter, and IAM permissions.
 The updater reads `CLUSTER_ARN`, `SERVICE_NAME`, `HOSTED_ZONE_ID`, `DNS_NAME`,
 and `DNS_TTL` from the Lambda environment. CDK supplies all five values.
 
-The management service is the independent Go 1.27.1 application and Docker
-asset under [`../ts6-management`](../ts6-management/README.md). It uses Gin
+The management API is the independent Go 1.27.1 application and Docker asset
+under [`../ts6-management-api`](../ts6-management-api/README.md). It uses Gin
 1.12 and AWS Lambda Web Adapter v1.0.1 on `provided.al2023`, listens on port
 8080, and receives `CLUSTER_ARN` and `SERVICE_NAME` from CDK. Its hexagonal
 dependency direction keeps the lifecycle domain and application service
 independent of Gin and the AWS SDK. Both the HTTP and SQS inbound adapters call
 the same lifecycle application service.
+
+For local interactive use, both management applications provide
+`.env.example` files. The API example configures the AWS profile, Region,
+cluster ARN, and service name. The web example configures only the local API
+URL. Neither file contains or accepts the management API key as persisted
+configuration.
 
 `POST /start` changes desired count from zero to one and otherwise does
 nothing. `POST /stop` changes a positive desired count to zero, including an
@@ -169,13 +186,18 @@ go build ./...
 govulncheck ./... # when installed
 docker build --platform linux/amd64 .
 
-cd ../ts6-management
+cd ../ts6-management-api
 go mod verify
 go test -race ./...
 go vet ./...
 go build ./...
 govulncheck ./... # when installed
 docker build --platform linux/amd64 .
+
+cd ../ts6-management-web
+npm ci
+npm test
+npm run build
 ```
 
 ## Persistence and deployment safety
@@ -215,6 +237,12 @@ operator deletion.
 From `infra/aws`:
 
 ```bash
+cd ../../apps/ts6-management-web
+npm ci
+npm test
+npm run build
+
+cd ../../../infra/aws
 go test ./...
 go vet ./...
 go build ./...
@@ -250,9 +278,21 @@ cdk bootstrap aws://<ACCOUNT_ID>/sa-east-1
 Review the proposed change:
 
 ```bash
-cd infra/aws
+cd apps/ts6-management-web
+npm ci
+npm test
+npm run build
+
+cd ../../../infra/aws
 cdk diff PersonalPlatformTeamspeak6Stack
 ```
+
+The API/web naming migration intentionally replaces the named management
+Lambda, log group, API key, FIFO queues, frontend bucket, and CloudFront
+distribution. Before deploying it over an existing stack, inspect and drain
+the old command queue and DLQ, and export any management logs that must be
+retained. The old key and CloudFront URL stop working after replacement; use
+the new `ManagementAPIKeyID` and `ManagementWebURL` outputs after deployment.
 
 Deploy only while the ECS service currently has desired count `1` and is
 running. A CDK deployment reconciles the template's desired count back to `1`,
@@ -270,10 +310,17 @@ All three Docker assets are built locally for `linux/amd64` and published throug
 the CDK bootstrap ECR asset repository. The application does not create a
 separate named ECR repository.
 
-## Management API and command queue operation
+## Management console, API, and command queue operation
 
-The deployment outputs `ManagementAPIURL` and `ManagementAPIKeyID`. The key
-value is intentionally absent from CloudFormation outputs and source control.
+The deployment outputs `ManagementWebURL`, `ManagementAPIURL`, and
+`ManagementAPIKeyID`. Open the CloudFront URL and enter the retrieved key to
+authenticate the SPA. The key remains only in that tab's memory: it is not put
+in browser storage, the URL, logs, or runtime configuration. The SPA polls
+every two seconds while visible, displays start timestamps as Brasília time,
+and calls API Gateway directly rather than through CloudFront.
+
+The key value is intentionally absent from CloudFormation outputs and source
+control.
 After deployment, retrieve it privately using the output key ID:
 
 ```bash
@@ -316,22 +363,22 @@ The URL output ends in `/prod/`. Missing or invalid keys receive API Gateway's
 Conflicting concurrent start and stop requests use last-accepted-write
 semantics. The API has no durable lifecycle history.
 
-The deployment also outputs `ManagementCommandQueueURL`,
-`ManagementCommandQueueARN`, and `ManagementCommandDLQURL`. The command queue
-invokes the management Lambda directly; it does not call API Gateway or require
-the management API key. Every sender must use FIFO message-group ID
+The deployment also outputs `ManagementAPICommandQueueURL`,
+`ManagementAPICommandQueueARN`, and `ManagementAPICommandDLQURL`. The command
+queue invokes the management API Lambda directly; it does not call API Gateway
+or require the management API key. Every sender must use FIFO message-group ID
 `teamspeak6`. For example:
 
 ```bash
 aws sqs send-message \
   --region sa-east-1 \
-  --queue-url '<ManagementCommandQueueURL>' \
+  --queue-url '<ManagementAPICommandQueueURL>' \
   --message-group-id teamspeak6 \
   --message-body '{"action":"start"}'
 
 aws sqs send-message \
   --region sa-east-1 \
-  --queue-url '<ManagementCommandQueueURL>' \
+  --queue-url '<ManagementAPICommandQueueURL>' \
   --message-group-id teamspeak6 \
   --message-body '{"action":"stop"}'
 ```
@@ -407,6 +454,9 @@ After deployment, the user verifies:
    memory/CPU use.
 7. Channels, permissions, files, and any chat history TeamSpeak itself persists
    survive a task replacement and a scale-to-zero/start cycle.
+8. `ManagementWebURL` loads over HTTPS, accepts the private key, reports
+   status, pauses polling in a hidden tab, and successfully starts and stops
+   through the direct API Gateway URL.
 
 Startup logs can contain the privilege key or other credentials. Treat the
 entire log group as secret-bearing, never paste unsanitized logs into issues or
@@ -452,8 +502,9 @@ unavailable. Never scale above `1`. Fargate compute and public-IPv4 charges stop
 at desired count `0`; Route 53, EFS, ECR image storage, and retained CloudWatch
 log storage continue charging.
 
-Stronger authentication, browser/CORS support, durable history, sender roles
-and automations, and CI/CD automation remain deferred.
+Stronger authentication, exact-origin CORS after a stable custom frontend
+domain, durable history, sender roles and automations, and CI/CD automation
+remain deferred.
 
 ## Logs and troubleshooting
 
@@ -535,6 +586,11 @@ support, and tax:
   cost as zero at its precision when the shared monthly SQS free tier is
   available; recalculate if other workloads consume that allowance or failed
   messages accumulate.
+- The management SPA stores only a small static build in S3 and serves it
+  through CloudFront. At personal-use volume its S3 storage and request costs
+  round to zero at this model's precision, and its CloudFront requests and
+  transfer are expected to remain within the account's shared free allowance.
+  Recalculate if other workloads consume that allowance.
 - Internet data transfer out: the first 100 GB per month is free in aggregate
   across eligible AWS services and Regions; São Paulo's first paid tier is USD
   0.15 per GB. The scenarios assume usage remains inside the shared free tier.
@@ -571,6 +627,8 @@ Official references:
 - [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/)
 - [Amazon API Gateway pricing](https://aws.amazon.com/api-gateway/pricing/)
 - [Amazon SQS pricing](https://aws.amazon.com/sqs/pricing/)
+- [Amazon S3 pricing](https://aws.amazon.com/s3/pricing/)
+- [Amazon CloudFront pricing](https://aws.amazon.com/cloudfront/pricing/)
 - [API Gateway usage-plan and API-key guidance](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-api-usage-plans.html)
 - [Amazon EventBridge pricing](https://aws.amazon.com/eventbridge/pricing/)
 - [Public IPv4 pricing](https://aws.amazon.com/vpc/pricing/)
@@ -583,8 +641,9 @@ stored data, image size, logging, or transfer assumptions change.
 
 ## Deferred work and recovery limits
 
-Deferred work includes stronger management authorization, browser/CORS
-support, command sender roles and automations, durable lifecycle history, CI/CD,
+Deferred work includes stronger management authorization, a stable frontend
+domain with exact-origin CORS, command sender roles and automations, durable
+lifecycle history, CI/CD,
 Route 53 DNSSEC signing, backups and tested restore, monitoring alarms, and
 automated budget controls. None is implied by the current stack.
 

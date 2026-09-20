@@ -2,12 +2,15 @@
 package teamspeak6
 
 import (
+	"net/http"
 	"strconv"
 
 	"aws/internal/costtags"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsapigateway"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awscloudfront"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awscloudfrontorigins"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsec2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsecrassets"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsecs"
@@ -19,6 +22,8 @@ import (
 	"github.com/aws/aws-cdk-go/awscdk/v2/awslambdaeventsources"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awslogs"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsroute53"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awss3"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awss3deployment"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awssqs"
 	"github.com/aws/constructs-go/constructs/v10"
 	"github.com/aws/jsii-runtime-go"
@@ -31,16 +36,17 @@ const (
 	dnsRecordTTL              = 60
 	dnsUpdaterScheduleMinutes = 5
 	serviceName               = "teamspeak6"
-	commandQueueName          = "personal-platform-teamspeak6-commands.fifo"
-	commandDLQName            = "personal-platform-teamspeak6-commands-dlq.fifo"
+	commandQueueName          = "personal-platform-teamspeak6-management-api-commands.fifo"
+	commandDLQName            = "personal-platform-teamspeak6-management-api-commands-dlq.fifo"
 )
 
 // StackProps configures the TeamSpeak stack and its isolated Docker image assets.
 type StackProps struct {
 	awscdk.StackProps
-	ImageAssetDirectory           string
-	DNSUpdaterImageAssetDirectory string
-	ManagementImageAssetDirectory string
+	ImageAssetDirectory              string
+	DNSUpdaterImageAssetDirectory    string
+	ManagementAPIImageAssetDirectory string
+	ManagementWebDirectory           string
 }
 
 type stackOutputResources struct {
@@ -53,6 +59,7 @@ type stackOutputResources struct {
 	hostedZone    awsroute53.PublicHostedZone
 	managementAPI awsapigateway.RestApi
 	managementKey awsapigateway.IApiKey
+	managementWeb awscloudfront.Distribution
 	commandQueue  awssqs.Queue
 	commandDLQ    awssqs.Queue
 }
@@ -69,8 +76,11 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 	if props.DNSUpdaterImageAssetDirectory == "" {
 		panic("teamspeak6: dns updater image asset directory is required")
 	}
-	if props.ManagementImageAssetDirectory == "" {
-		panic("teamspeak6: management image asset directory is required")
+	if props.ManagementAPIImageAssetDirectory == "" {
+		panic("teamspeak6: management api image asset directory is required")
+	}
+	if props.ManagementWebDirectory == "" {
+		panic("teamspeak6: management web directory is required")
 	}
 
 	stackProps := props.StackProps
@@ -99,6 +109,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		},
 		VpcName: jsii.String("teamspeak6"),
 	})
+	costtags.ApplyComponent(vpc, costtags.ComponentServer)
 
 	taskSecurityGroup := awsec2.NewSecurityGroup(
 		stack,
@@ -122,6 +133,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		jsii.String("TeamSpeak file transfer"),
 		jsii.Bool(false),
 	)
+	costtags.ApplyComponent(taskSecurityGroup, costtags.ComponentServer)
 
 	fileSystem := awsefs.NewFileSystem(stack, jsii.String("FileSystem"), &awsefs.FileSystemProps{
 		Vpc:             vpc,
@@ -151,18 +163,22 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 			},
 		},
 	)
+	costtags.ApplyComponent(fileSystem, costtags.ComponentServer)
+	costtags.ApplyComponent(accessPoint, costtags.ComponentServer)
 
 	logGroup := awslogs.NewLogGroup(stack, jsii.String("LogGroup"), &awslogs.LogGroupProps{
 		LogGroupName:  jsii.String("/personal-platform/teamspeak6"),
 		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
 		Retention:     awslogs.RetentionDays_ONE_WEEK,
 	})
+	costtags.ApplyComponent(logGroup, costtags.ComponentServer)
 
 	cluster := awsecs.NewCluster(stack, jsii.String("Cluster"), &awsecs.ClusterProps{
 		ClusterName:         jsii.String("personal-platform-teamspeak6"),
 		ContainerInsightsV2: awsecs.ContainerInsights_DISABLED,
 		Vpc:                 vpc,
 	})
+	costtags.ApplyComponent(cluster, costtags.ComponentServer)
 	hostedZone := awsroute53.NewPublicHostedZone(
 		stack,
 		jsii.String("HostedZone"),
@@ -172,6 +188,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		},
 	)
 	hostedZone.ApplyRemovalPolicy(awscdk.RemovalPolicy_RETAIN)
+	costtags.ApplyComponent(hostedZone, costtags.ComponentServer)
 
 	taskDefinition := awsecs.NewFargateTaskDefinition(
 		stack,
@@ -186,6 +203,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 			},
 		},
 	)
+	costtags.ApplyComponent(taskDefinition, costtags.ComponentServer)
 	taskDefinition.AddVolume(&awsecs.Volume{
 		Name: jsii.String(dataVolumeName),
 		EfsVolumeConfiguration: &awsecs.EfsVolumeConfiguration{
@@ -267,6 +285,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 			SubnetGroupName: jsii.String("public"),
 		},
 	})
+	costtags.ApplyComponent(service, costtags.ComponentServer)
 	fileSystem.Connections().AllowDefaultPortFrom(
 		service,
 		jsii.String("TeamSpeak tasks mount EFS"),
@@ -279,6 +298,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		hostedZone,
 		props.DNSUpdaterImageAssetDirectory,
 	)
+	costtags.ApplyComponent(dnsUpdater, costtags.ComponentServer)
 	dnsUpdateRule := awsevents.NewRule(stack, jsii.String("DNSUpdateRule"), &awsevents.RuleProps{
 		Description: jsii.String("Keep the TeamSpeak DNS record synchronized with the running Fargate task"),
 		EventPattern: &awsevents.EventPattern{
@@ -302,12 +322,18 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 			RetryAttempts: jsii.Number(10),
 		},
 	))
+	costtags.ApplyComponent(dnsUpdateRule, costtags.ComponentServer)
 	service.Node().AddDependency(dnsUpdateRule)
 	management := newManagementAPI(
 		stack,
 		cluster,
 		service,
-		props.ManagementImageAssetDirectory,
+		props.ManagementAPIImageAssetDirectory,
+	)
+	managementWeb := newManagementWeb(
+		stack,
+		management.api,
+		props.ManagementWebDirectory,
 	)
 
 	newOutputs(stack, stackOutputResources{
@@ -320,6 +346,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		hostedZone:    hostedZone,
 		managementAPI: management.api,
 		managementKey: management.key,
+		managementWeb: managementWeb,
 		commandQueue:  management.commandQueue,
 		commandDLQ:    management.commandDLQ,
 	})
@@ -327,7 +354,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 	return stack
 }
 
-type managementResources struct {
+type managementAPIResources struct {
 	api          awsapigateway.RestApi
 	key          awsapigateway.IApiKey
 	commandQueue awssqs.Queue
@@ -339,13 +366,13 @@ func newManagementAPI(
 	cluster awsecs.Cluster,
 	service awsecs.FargateService,
 	imageAssetDirectory string,
-) managementResources {
-	logGroup := awslogs.NewLogGroup(stack, jsii.String("ManagementLogGroup"), &awslogs.LogGroupProps{
-		LogGroupName:  jsii.String("/personal-platform/teamspeak6/management"),
+) managementAPIResources {
+	logGroup := awslogs.NewLogGroup(stack, jsii.String("ManagementAPILogGroup"), &awslogs.LogGroupProps{
+		LogGroupName:  jsii.String("/personal-platform/teamspeak6/management-api"),
 		RemovalPolicy: awscdk.RemovalPolicy_DESTROY,
 		Retention:     awslogs.RetentionDays_ONE_WEEK,
 	})
-	commandDLQ := awssqs.NewQueue(stack, jsii.String("ManagementCommandDLQ"), &awssqs.QueueProps{
+	commandDLQ := awssqs.NewQueue(stack, jsii.String("ManagementAPICommandDLQ"), &awssqs.QueueProps{
 		ContentBasedDeduplication: jsii.Bool(true),
 		Encryption:                awssqs.QueueEncryption_SQS_MANAGED,
 		EnforceSSL:                jsii.Bool(true),
@@ -354,7 +381,7 @@ func newManagementAPI(
 		RemovalPolicy:             awscdk.RemovalPolicy_DESTROY,
 		RetentionPeriod:           awscdk.Duration_Days(jsii.Number(14)),
 	})
-	commandQueue := awssqs.NewQueue(stack, jsii.String("ManagementCommandQueue"), &awssqs.QueueProps{
+	commandQueue := awssqs.NewQueue(stack, jsii.String("ManagementAPICommandQueue"), &awssqs.QueueProps{
 		ContentBasedDeduplication: jsii.Bool(true),
 		DeadLetterQueue: &awssqs.DeadLetterQueue{
 			MaxReceiveCount: jsii.Number(5),
@@ -369,7 +396,7 @@ func newManagementAPI(
 	})
 	function := awslambda.NewDockerImageFunction(
 		stack,
-		jsii.String("ManagementFunction"),
+		jsii.String("ManagementAPIFunction"),
 		&awslambda.DockerImageFunctionProps{
 			Architecture: awslambda.Architecture_X86_64(),
 			Code: awslambda.DockerImageCode_FromImageAsset(
@@ -383,7 +410,7 @@ func newManagementAPI(
 				"CLUSTER_ARN":  cluster.ClusterArn(),
 				"SERVICE_NAME": service.ServiceName(),
 			},
-			FunctionName: jsii.String("personal-platform-teamspeak6-management"),
+			FunctionName: jsii.String("personal-platform-teamspeak6-management-api"),
 			LogGroup:     logGroup,
 			MemorySize:   jsii.Number(128),
 			Timeout:      awscdk.Duration_Seconds(jsii.Number(15)),
@@ -435,37 +462,58 @@ func newManagementAPI(
 		EndpointTypes: &[]awsapigateway.EndpointType{
 			awsapigateway.EndpointType_REGIONAL,
 		},
-		RestApiName: jsii.String("personal-platform-teamspeak6-management"),
+		RestApiName: jsii.String("personal-platform-teamspeak6-management-api"),
 	})
 	api.Node().TryRemoveChild(jsii.String("Endpoint"))
+	for _, response := range []struct {
+		id           string
+		responseType awsapigateway.ResponseType
+	}{
+		{id: "Default4XX", responseType: awsapigateway.ResponseType_DEFAULT_4XX()},
+		{id: "Default5XX", responseType: awsapigateway.ResponseType_DEFAULT_5XX()},
+	} {
+		api.AddGatewayResponse(jsii.String(response.id), &awsapigateway.GatewayResponseOptions{
+			Type: response.responseType,
+			ResponseHeaders: &map[string]*string{
+				"Access-Control-Allow-Origin": jsii.String("'*'"),
+			},
+		})
+	}
 	integration := awsapigateway.NewLambdaIntegration(function, nil)
 	methodOptions := &awsapigateway.MethodOptions{
 		ApiKeyRequired:    jsii.Bool(true),
 		AuthorizationType: awsapigateway.AuthorizationType_NONE,
 	}
-	api.Root().AddResource(jsii.String("start"), nil).AddMethod(
+	preflight := &awsapigateway.CorsOptions{
+		AllowOrigins:     awsapigateway.Cors_ALL_ORIGINS(),
+		AllowMethods:     &[]*string{jsii.String(http.MethodGet), jsii.String(http.MethodPost)},
+		AllowHeaders:     &[]*string{jsii.String("X-Api-Key")},
+		AllowCredentials: jsii.Bool(false),
+	}
+	resourceOptions := &awsapigateway.ResourceOptions{DefaultCorsPreflightOptions: preflight}
+	api.Root().AddResource(jsii.String("start"), resourceOptions).AddMethod(
 		jsii.String("POST"),
 		integration,
 		methodOptions,
 	)
-	api.Root().AddResource(jsii.String("stop"), nil).AddMethod(
+	api.Root().AddResource(jsii.String("stop"), resourceOptions).AddMethod(
 		jsii.String("POST"),
 		integration,
 		methodOptions,
 	)
-	api.Root().AddResource(jsii.String("status"), nil).AddMethod(
+	api.Root().AddResource(jsii.String("status"), resourceOptions).AddMethod(
 		jsii.String("GET"),
 		integration,
 		methodOptions,
 	)
 
 	key := api.AddApiKey(jsii.String("ManagementAPIKey"), &awsapigateway.ApiKeyOptions{
-		ApiKeyName:  jsii.String("personal-platform-teamspeak6-management"),
+		ApiKeyName:  jsii.String("personal-platform-teamspeak6-management-api"),
 		Description: jsii.String("Private key for the TeamSpeak lifecycle management API"),
 	})
-	usagePlan := api.AddUsagePlan(jsii.String("ManagementUsagePlan"), &awsapigateway.UsagePlanProps{
+	usagePlan := api.AddUsagePlan(jsii.String("ManagementAPIUsagePlan"), &awsapigateway.UsagePlanProps{
 		Description: jsii.String("Low-rate access to TeamSpeak lifecycle operations"),
-		Name:        jsii.String("personal-platform-teamspeak6-management"),
+		Name:        jsii.String("personal-platform-teamspeak6-management-api"),
 		Throttle: &awsapigateway.ThrottleSettings{
 			BurstLimit: jsii.Number(5),
 			RateLimit:  jsii.Number(2),
@@ -477,12 +525,80 @@ func newManagementAPI(
 	})
 	usagePlan.AddApiKey(key, nil)
 
-	return managementResources{
+	costtags.ApplyComponent(logGroup, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(commandDLQ, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(commandQueue, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(function, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(api, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(key, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(usagePlan, costtags.ComponentManagementAPI)
+
+	return managementAPIResources{
 		api:          api,
 		key:          key,
 		commandQueue: commandQueue,
 		commandDLQ:   commandDLQ,
 	}
+}
+
+func newManagementWeb(
+	stack awscdk.Stack,
+	api awsapigateway.RestApi,
+	assetDirectory string,
+) awscloudfront.Distribution {
+	bucket := awss3.NewBucket(stack, jsii.String("ManagementWebBucket"), &awss3.BucketProps{
+		BlockPublicAccess: awss3.BlockPublicAccess_BLOCK_ALL(),
+		Encryption:        awss3.BucketEncryption_S3_MANAGED,
+		EnforceSSL:        jsii.Bool(true),
+		RemovalPolicy:     awscdk.RemovalPolicy_DESTROY,
+	})
+	origin := awscloudfrontorigins.S3BucketOrigin_WithOriginAccessControl(bucket, nil)
+	distribution := awscloudfront.NewDistribution(
+		stack,
+		jsii.String("ManagementWebDistribution"),
+		&awscloudfront.DistributionProps{
+			Comment:           jsii.String("Private TeamSpeak lifecycle management SPA"),
+			DefaultRootObject: jsii.String("index.html"),
+			DefaultBehavior: &awscloudfront.BehaviorOptions{
+				AllowedMethods:       awscloudfront.AllowedMethods_ALLOW_GET_HEAD_OPTIONS(),
+				Compress:             jsii.Bool(true),
+				Origin:               origin,
+				ViewerProtocolPolicy: awscloudfront.ViewerProtocolPolicy_REDIRECT_TO_HTTPS,
+			},
+		},
+	)
+	runtimeConfig := awscdk.Fn_Join(jsii.String(""), &[]*string{
+		jsii.String("window.__TS6_RUNTIME_CONFIG__ = Object.freeze({ apiBaseUrl: \""),
+		api.Url(),
+		jsii.String("\" });\n"),
+	})
+	deployment := awss3deployment.NewBucketDeployment(
+		stack,
+		jsii.String("ManagementWebDeployment"),
+		&awss3deployment.BucketDeploymentProps{
+			DestinationBucket: bucket,
+			Distribution:      distribution,
+			DistributionPaths: &[]*string{jsii.String("/*")},
+			Prune:             jsii.Bool(true),
+			RetainOnDelete:    jsii.Bool(false),
+			Sources: &[]awss3deployment.ISource{
+				awss3deployment.Source_Asset(jsii.String(assetDirectory), nil),
+				awss3deployment.Source_Data(
+					jsii.String("runtime-config.js"),
+					runtimeConfig,
+					&awss3deployment.MarkersConfig{JsonEscape: jsii.Bool(false)},
+				),
+			},
+		},
+	)
+	costtags.ApplyComponent(bucket, costtags.ComponentManagementWeb)
+	costtags.ApplyComponent(distribution, costtags.ComponentManagementWeb)
+	costtags.ApplyComponent(deployment, costtags.ComponentManagementWeb)
+	deploymentProvider := deployment.HandlerRole().Node().Scope()
+	// BucketDeployment's singleton provider is a stack sibling, not a deployment child.
+	costtags.ApplyComponent(deploymentProvider, costtags.ComponentManagementWeb)
+
+	return distribution
 }
 
 func newDNSUpdater(
@@ -522,6 +638,8 @@ func newDNSUpdater(
 			Timeout:       awscdk.Duration_Seconds(jsii.Number(30)),
 		},
 	)
+	costtags.ApplyComponent(logGroup, costtags.ComponentServer)
+	costtags.ApplyComponent(updater, costtags.ComponentServer)
 	updater.AddToRolePolicy(awsiam.NewPolicyStatement(&awsiam.PolicyStatementProps{
 		Actions: &[]*string{jsii.String("ecs:ListTasks")},
 		Conditions: &map[string]interface{}{
@@ -625,17 +743,25 @@ func newOutputs(stack awscdk.Stack, resources stackOutputResources) {
 			description: "API key ID used to retrieve the private key value",
 		},
 		{
-			id:          "ManagementCommandQueueURL",
+			id: "ManagementWebURL",
+			value: awscdk.Fn_Join(jsii.String(""), &[]*string{
+				jsii.String("https://"),
+				resources.managementWeb.DistributionDomainName(),
+			}),
+			description: "CloudFront URL for the TeamSpeak management web app",
+		},
+		{
+			id:          "ManagementAPICommandQueueURL",
 			value:       resources.commandQueue.QueueUrl(),
 			description: "FIFO queue URL for TeamSpeak lifecycle commands",
 		},
 		{
-			id:          "ManagementCommandQueueARN",
+			id:          "ManagementAPICommandQueueARN",
 			value:       resources.commandQueue.QueueArn(),
 			description: "FIFO queue ARN for TeamSpeak lifecycle commands",
 		},
 		{
-			id:          "ManagementCommandDLQURL",
+			id:          "ManagementAPICommandDLQURL",
 			value:       resources.commandDLQ.QueueUrl(),
 			description: "Dead-letter queue URL for failed lifecycle commands",
 		},
