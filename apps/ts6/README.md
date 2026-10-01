@@ -3,7 +3,7 @@
 This directory is the source of truth for the personal TeamSpeak 6 Server beta
 application and its AWS deployment. The server is intended for four
 simultaneous users in AWS São Paulo (`sa-east-1`). It uses the pinned
-`teamspeaksystems/teamspeak6-server:6.0.0-beta12.1` image, embedded SQLite, one
+`teamspeaksystems/teamspeak6-server:6.0.0-beta13.1` image, embedded SQLite, one
 on-demand ECS Fargate task, and retained EFS One Zone storage.
 
 The `production` tag identifies a long-lived personal environment. This design

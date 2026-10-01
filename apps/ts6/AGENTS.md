@@ -12,7 +12,7 @@ runbook. The CDK implementation is in `../../infra/aws/teamspeak6`.
 - Use AWS CDK v2 with Go and the separate
   `PersonalPlatformTeamspeak6Stack` in `sa-east-1`.
 - Keep the storage stack in `us-east-1` unchanged.
-- Pin `teamspeaksystems/teamspeak6-server:6.0.0-beta12.1`; never use `latest`.
+- Pin `teamspeaksystems/teamspeak6-server:6.0.0-beta13.1`; never use `latest`.
 - Build and run Linux/x86-64 only.
 - Use one on-demand ECS Fargate task at `0.25 vCPU / 512 MiB`, desired count
   `1` while running and `0` while stopped. Do not use Fargate Spot capacity.

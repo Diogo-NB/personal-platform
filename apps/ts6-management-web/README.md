@@ -38,8 +38,9 @@ CDK deploys `dist` to a private, encrypted, public-access-blocked S3 bucket.
 CloudFront reads the bucket through Origin Access Control, redirects HTTP to
 HTTPS, and serves only static files. The distribution keeps its generated
 CloudFront hostname and has no custom alias or viewer certificate. The browser
-calls the Regional API Gateway custom hostname directly. The generated
-execute-api URL remains available only as a rollback path.
+calls the Regional API Gateway custom hostname directly. The content security
+policy allows connections only to that custom hostname. The generated
+execute-api URL and localhost are not allowed browser connection targets.
 
 ## Local development
 
