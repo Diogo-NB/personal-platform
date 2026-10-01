@@ -30,12 +30,16 @@ cp .env.example .env
 
 The `.env` file is ignored by Git. Never add the API key to a `VITE_` variable:
 Vite embeds those variables in browser code. CDK replaces `runtime-config.js`
-during deployment with a file containing only the API Gateway base URL, and
-that deployment configuration takes precedence over the build-time value.
+during deployment with a file containing only
+`https://ts-management-api.diogo-nb.com.br/`, and that deployment configuration
+takes precedence over the build-time value.
 
 CDK deploys `dist` to a private, encrypted, public-access-blocked S3 bucket.
 CloudFront reads the bucket through Origin Access Control, redirects HTTP to
-HTTPS, and serves only static files. The browser calls API Gateway directly.
+HTTPS, and serves only static files. The distribution keeps its generated
+CloudFront hostname and has no custom alias or viewer certificate. The browser
+calls the Regional API Gateway custom hostname directly. The generated
+execute-api URL remains available only as a rollback path.
 
 ## Local development
 

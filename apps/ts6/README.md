@@ -4,7 +4,7 @@ This directory is the source of truth for the personal TeamSpeak 6 Server beta
 application and its AWS deployment. The server is intended for four
 simultaneous users in AWS São Paulo (`sa-east-1`). It uses the pinned
 `teamspeaksystems/teamspeak6-server:6.0.0-beta12.1` image, embedded SQLite, one
-ECS Fargate Spot task, and retained EFS One Zone storage.
+on-demand ECS Fargate task, and retained EFS One Zone storage.
 
 The `production` tag identifies a long-lived personal environment. This design
 does not provide production-grade availability or recoverability: it has one
@@ -19,7 +19,7 @@ Internet
   |  ts.diogo-nb.com.br (Route 53, TTL 60 seconds)
   |
   |-- 9987/UDP (voice) -----------+
-  `-- 30033/TCP (file transfer) --+--> public Fargate Spot task
+  `-- 30033/TCP (file transfer) --+--> public on-demand Fargate task
                                          TeamSpeak 6 beta
                                          Linux/x86-64
                                               |
@@ -32,11 +32,12 @@ ECS RUNNING events --+
                       +--> Lambda DNS updater --> Route 53 A record
 5-minute schedule ----+
 
-Operator -- x-api-key --> API Gateway REST API (prod) --+
-                                                         |
-Command sender --> encrypted SQS FIFO queue -------------+
-                    group: teamspeak6                    |
-                                                         v
+Operator -- x-api-key --> ts-management-api.diogo-nb.com.br --+
+                         Regional API Gateway (prod)            |
+                                                                |
+Command sender --> encrypted SQS FIFO queue --------------------+
+                    group: teamspeak6                           |
+                                                                v
                                               Lambda management service
                                                | start / stop / status
                                                v
@@ -44,7 +45,7 @@ Command sender --> encrypted SQS FIFO queue -------------+
 
 Browser --> CloudFront -- OAC --> private S3 web app
    |
-   `------ x-api-key -------> API Gateway REST API (prod)
+   `------ x-api-key -------> ts-management-api.diogo-nb.com.br
 ```
 
 The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
@@ -53,7 +54,7 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   Gateway, and no NAT Gateway.
 - An ECS cluster named `personal-platform-teamspeak6` and a service named
   `teamspeak6`.
-- One Linux/x86-64 Fargate Spot task using `0.25 vCPU`, `512 MiB` of memory,
+- One on-demand Linux/x86-64 Fargate task using `0.25 vCPU`, `512 MiB` of memory,
   and an automatically assigned public IPv4 address.
 - An encrypted EFS One Zone file system and an access point enforcing UID/GID
   `9987`, mounted read-write at `/var/tsserver` with TLS and IAM authorization.
@@ -66,6 +67,9 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   stopping, and reporting the status of the singleton ECS service. All three
   public methods require a generated API key and share a two-request/second,
   burst-five usage plan.
+- An exact-name ACM certificate in `sa-east-1`, a TLS 1.2 Regional API Gateway
+  custom domain at `ts-management-api.diogo-nb.com.br`, and a Route 53 IPv4
+  alias that maps the custom-domain root to the existing `prod` stage.
 - A private, encrypted, public-access-blocked S3 bucket and CloudFront
   distribution for the management SPA. CloudFront uses Origin Access Control,
   redirects viewers to HTTPS, and serves no API routes.
@@ -86,11 +90,14 @@ security group admits only `9987/UDP` and `30033/TCP` from IPv4 clients. Query
 SSH (`10022`), HTTP (`10080`), and HTTPS (`10443`) are disabled in
 `tsserver.yaml` and have no ingress rules.
 
-The management API uses the default API Gateway execute-api hostname. It has no
-custom domain, Route 53 record, Lambda Function URL, or CloudFront proxy. The
-browser client calls that hostname directly. Gin and API Gateway preflight
-handlers allow all browser origins for v1 without credentials, and gateway
-4xx/5xx responses include the wildcard origin so the SPA can read failures.
+The management API uses the Regional custom hostname
+`ts-management-api.diogo-nb.com.br`. Its original execute-api hostname remains
+enabled as a rollback path; there is no Lambda Function URL or CloudFront API
+proxy. The browser client calls the custom hostname directly. Gin and API
+Gateway preflight handlers allow all browser origins for v1 without
+credentials, and gateway 4xx/5xx responses include the wildcard origin so the
+SPA can read failures from the current CloudFront hostname and a future custom
+frontend hostname.
 An API key is lightweight access control and request metering, not
 strong authentication or authorization. AWS recommends stronger authorization
 for sensitive APIs; this limitation is accepted for the initial private v1.
@@ -202,13 +209,10 @@ npm run build
 
 ## Persistence and deployment safety
 
-The ECS service starts with desired count `1` and uses only the
-`FARGATE_SPOT` capacity provider; it does not fall back to on-demand Fargate.
-AWS can interrupt the task with approximately two minutes of warning, and Spot
-capacity can be temporarily unavailable. ECS keeps requesting a replacement,
-but the singleton server remains offline until a Spot task reaches `RUNNING`.
-The existing 120-second container stop timeout gives TeamSpeak the full Spot
-warning window to shut down after receiving `SIGTERM`.
+The ECS service starts with desired count `1` and uses only the on-demand
+`FARGATE` capacity provider. It does not use Fargate Spot capacity. The
+120-second container stop timeout gives TeamSpeak time to shut down after
+receiving `SIGTERM` during deployments, scaling, and task replacement.
 
 The deployment limits are `minimumHealthyPercent=0` and `maximumPercent=100`,
 so an update stops the old task before starting a replacement. ECS deployment
@@ -306,6 +310,11 @@ After explicit approval, the user deploys:
 cdk deploy PersonalPlatformTeamspeak6Stack
 ```
 
+CloudFormation validates the regional ACM certificate through the existing
+hosted zone, creates the API Gateway custom domain and alias, uploads the new
+runtime configuration, and invalidates CloudFront. Keep the ECS service at
+desired count `1` until the deployment finishes.
+
 All three Docker assets are built locally for `linux/amd64` and published through
 the CDK bootstrap ECR asset repository. The application does not create a
 separate named ECR repository.
@@ -317,7 +326,8 @@ The deployment outputs `ManagementWebURL`, `ManagementAPIURL`, and
 authenticate the SPA. The key remains only in that tab's memory: it is not put
 in browser storage, the URL, logs, or runtime configuration. The SPA polls
 every two seconds while visible, displays start timestamps as Brasília time,
-and calls API Gateway directly rather than through CloudFront.
+and calls `https://ts-management-api.diogo-nb.com.br/` directly rather than
+through CloudFront. `ManagementWebURL` remains the generated CloudFront URL.
 
 The key value is intentionally absent from CloudFormation outputs and source
 control.
@@ -358,8 +368,9 @@ curl --fail-with-body \
 unset TS6_MANAGEMENT_API_KEY
 ```
 
-The URL output ends in `/prod/`. Missing or invalid keys receive API Gateway's
-`403` response. Successful start and stop responses are empty `202` responses.
+The URL output is `https://ts-management-api.diogo-nb.com.br/`. Missing or
+invalid keys receive API Gateway's `403` response. Successful start and stop
+responses are empty `202` responses.
 Conflicting concurrent start and stop requests use last-accepted-write
 semantics. The API has no durable lifecycle history.
 
@@ -404,8 +415,9 @@ interleave with queue commands under the existing last-accepted-write behavior.
 
 ## DNS setup and automatic updates
 
-The client address is `ts.diogo-nb.com.br`. The stack creates a Route 53 public
-hosted zone for `diogo-nb.com.br`, but Registro.br remains the domain
+The TeamSpeak client address is `ts.diogo-nb.com.br`, and the management API
+address is `ts-management-api.diogo-nb.com.br`. The stack creates a Route 53
+public hosted zone for `diogo-nb.com.br`, but Registro.br remains the domain
 registrar. Route 53 becomes authoritative only after this one-time delegation:
 
 1. Deploy the stack and copy the four values from its `NameServers` output.
@@ -422,10 +434,14 @@ registrar. Route 53 becomes authoritative only after this one-time delegation:
 ```bash
 dig NS diogo-nb.com.br +short
 dig A ts.diogo-nb.com.br +short
+dig A ts-management-api.diogo-nb.com.br +short
 ```
 
-Do not create or update the `A` record manually. The updater runs when the ECS
-task reaches `RUNNING` and every five minutes as reconciliation. It finds the
+The management API record is a CloudFormation-managed Route 53 alias to the
+Regional API Gateway domain. ACM validates its exact-name certificate through
+the same hosted zone. Do not create or update either `A` record manually. The
+TeamSpeak updater runs when the ECS task reaches `RUNNING` and every five
+minutes as reconciliation. It finds the
 singleton running task, resolves its current public IPv4, and performs a Route
 53 `UPSERT` only when the value changed. The record TTL is 60 seconds, so a
 replacement can take roughly the task startup time plus DNS-cache expiry to
@@ -456,7 +472,13 @@ After deployment, the user verifies:
    survive a task replacement and a scale-to-zero/start cycle.
 8. `ManagementWebURL` loads over HTTPS, accepts the private key, reports
    status, pauses polling in a hidden tab, and successfully starts and stops
-   through the direct API Gateway URL.
+   through `https://ts-management-api.diogo-nb.com.br/`.
+9. `dig A ts-management-api.diogo-nb.com.br +short` returns the API Gateway
+   alias result, and HTTPS presents a certificate valid for that hostname.
+10. `GET /status` succeeds with the API key; preflight and API Gateway error
+    responses remain readable by the browser.
+11. The original execute-api URL still works as a rollback path, and
+    `ts.diogo-nb.com.br` still resolves and accepts TeamSpeak connections.
 
 Startup logs can contain the privilege key or other credentials. Treat the
 entire log group as secret-bearing, never paste unsanitized logs into issues or
@@ -497,14 +519,19 @@ aws ecs wait services-stable \
 ```
 
 Keep using `ts.diogo-nb.com.br` after every start; the updater replaces the DNS
-value automatically. A start can remain pending while Fargate Spot capacity is
-unavailable. Never scale above `1`. Fargate compute and public-IPv4 charges stop
-at desired count `0`; Route 53, EFS, ECR image storage, and retained CloudWatch
-log storage continue charging.
+value automatically. Never scale above `1`. Fargate compute and public-IPv4
+charges stop at desired count `0`; Route 53, EFS, ECR image storage, and
+retained CloudWatch log storage continue charging.
 
 Stronger authentication, exact-origin CORS after a stable custom frontend
 domain, durable history, sender roles and automations, and CI/CD automation
 remain deferred.
+
+To roll back the custom API hostname, first redeploy the SPA runtime
+configuration with the generated execute-api `prod` URL. Only after that
+CloudFront invalidation completes should the custom-domain mapping and Route 53
+alias be removed. Removing DNS first leaves the current website configured with
+an unreachable API URL.
 
 ## Logs and troubleshooting
 
@@ -517,12 +544,11 @@ aws logs tail /personal-platform/teamspeak6 \
 ```
 
 If users cannot connect, check the service desired count and running task, then
-inspect stopped-task reasons, pending-task events, and CloudWatch logs. A Spot
-interruption or unavailable Spot capacity can leave the desired task pending.
-Compare the task's public IPv4 with `dig A ts.diogo-nb.com.br +short`; DNS
-updater logs are in `/personal-platform/teamspeak6/dns-updater`. Also confirm
-the subnet route and `9987/UDP` security-group rule. For file transfer, verify
-`30033/TCP`, TeamSpeak permissions and quotas, and free EFS capacity.
+inspect stopped-task reasons, pending-task events, and CloudWatch logs. Compare
+the task's public IPv4 with `dig A ts.diogo-nb.com.br +short`; DNS updater logs
+are in `/personal-platform/teamspeak6/dns-updater`. Also confirm the subnet
+route and `9987/UDP` security-group rule. For file transfer, verify `30033/TCP`,
+TeamSpeak permissions and quotas, and free EFS capacity.
 
 If state appears missing, scale to zero before investigation. Verify that the
 task definition mounts the expected file-system and access-point IDs at
@@ -551,14 +577,14 @@ backup strategy before an upgrade where state loss is unacceptable.
 
 ## Cost model
 
-Estimate date: 2026-09-19. Regional services use public São Paulo rates;
+Estimate date: 2026-09-30. Regional services use public São Paulo rates;
 Route 53 authoritative DNS uses its global rate. Values are before credits,
 support, and tax:
 
-- Fargate Spot Linux/x86: USD 0.02199658 per vCPU-hour plus USD 0.00240193 per
-  GB-hour. The selected `0.25 vCPU / 0.5 GiB` task is approximately USD
-  0.00670011 per running hour. Spot rates vary with long-term supply and demand;
-  recalculate from the live AWS price table before relying on this estimate.
+- On-demand Fargate Linux/x86: USD 0.0696 per vCPU-hour plus USD 0.0076 per
+  GB-hour. The selected `0.25 vCPU / 0.5 GiB` task is USD 0.0212 per running
+  hour. Recalculate from the live AWS price table before relying on this
+  estimate.
 - One in-use public IPv4: USD 0.005 per running hour.
 - EFS One Zone: USD 0.304 per GB-month. The estimate assumes 1 GiB average
   stored; actual storage is elastic. Bursting throughput is selected, and same-
@@ -580,6 +606,9 @@ support, and tax:
   REST API tier's USD 3.50 per million requests, that is about USD 0.0011. The
   128 MiB management Lambda's request and duration usage is expected to fit
   within Lambda's shared monthly free tier when that allowance is available.
+- The non-exportable ACM certificate has no additional charge. Route 53 alias
+  queries to the API Gateway endpoint are not charged, so the custom API
+  hostname adds approximately USD 0 per month at this usage level.
 - The two SSE-SQS encrypted FIFO queues have no minimum fee. Send, receive,
   delete, visibility-change, payload-size, and retained-message usage is
   metered. This low-volume estimate treats the added SQS request and DLQ storage
@@ -598,11 +627,11 @@ support, and tax:
   12.15%, using `USD × 5.0918 × 1.1215`. AWS invoice conversion and taxes can
   differ.
 
-| Scenario | Fargate Spot + IPv4 | Persistent EFS/ECR + logs/DNS | USD before tax | Estimated BRL after tax |
+| Scenario | On-demand Fargate + IPv4 | Persistent EFS/ECR + logs/DNS | USD before tax | Estimated BRL after tax |
 |---|---:|---:|---:|---:|
-| One 4-hour session in a month | 0.0468 | 0.9260 | 0.9728 | R$5.56 |
-| 4 hours/day for 30 days | 1.4040 | 0.9260 | 2.3300 | R$13.31 |
-| Continuously running for 730 hours | 8.5411 | 0.9260 | 9.4671 | R$54.06 |
+| One 4-hour session in a month | 0.1048 | 0.9260 | 1.0308 | R$5.89 |
+| 4 hours/day for 30 days | 3.1440 | 0.9260 | 4.0700 | R$23.24 |
+| Continuously running for 730 hours | 19.1260 | 0.9260 | 20.0520 | R$114.51 |
 
 The non-compute subtotal is `1 GiB EFS + 0.3 GiB ECR + 0.1 GiB log ingestion +
 approximately 0.023 GiB-month retained log storage + one Route 53 hosted zone
@@ -616,7 +645,7 @@ Official references:
 - [TeamSpeak 6 configuration reference](https://github.com/teamspeak/teamspeak6-server/blob/main/CONFIG.md)
 - [Pinned Docker image tag](https://hub.docker.com/r/teamspeaksystems/teamspeak6-server/tags)
 - [AWS Fargate pricing](https://aws.amazon.com/fargate/pricing/)
-- [AWS Fargate capacity providers and Spot interruptions](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html)
+- [AWS Fargate capacity providers](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html)
 - [Amazon EFS pricing](https://aws.amazon.com/efs/pricing/)
 - [Amazon ECR pricing](https://aws.amazon.com/ecr/pricing/)
 - [Amazon CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/)
@@ -641,9 +670,10 @@ stored data, image size, logging, or transfer assumptions change.
 
 ## Deferred work and recovery limits
 
-Deferred work includes stronger management authorization, a stable frontend
-domain with exact-origin CORS, command sender roles and automations, durable
-lifecycle history, CI/CD,
+Deferred work includes stronger management authorization, a custom frontend
+hostname with its required `us-east-1` CloudFront certificate and Route 53
+`A`/`AAAA` aliases, exact-origin CORS, command sender roles and automations,
+durable lifecycle history, CI/CD,
 Route 53 DNSSEC signing, backups and tested restore, monitoring alarms, and
 automated budget controls. None is implied by the current stack.
 

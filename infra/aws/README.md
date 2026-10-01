@@ -15,7 +15,7 @@ The existing storage stack provisions the `skycrate-storage` S3 bucket in
 `us-east-1`. Do not change its Region when adding regional stacks to this CDK
 application.
 
-The TeamSpeak stack provisions a single public ECS Fargate Spot task in
+The TeamSpeak stack provisions a single public on-demand ECS Fargate task in
 `sa-east-1`, backed by an encrypted retained EFS One Zone file system. Its
 Docker image is built from `apps/ts6` and published as a CDK ECR asset. A
 separate reusable Go Lambda container asset is built from `apps/dns-updater`;
@@ -23,10 +23,13 @@ an EventBridge rule invokes the TeamSpeak-configured deployment when its ECS
 task reaches `RUNNING`, keeping `ts.diogo-nb.com.br` in the retained Route 53
 public hosted zone pointed at the current task's dynamic public IPv4. A third
 Go Lambda container asset is built from `apps/ts6-management-api` and exposed
-only through an API-key-protected API Gateway REST API for singleton start,
-stop, and status operations. The independent Vite app is deployed from
-`apps/ts6-management-web/dist` to a private S3 bucket and served through
-CloudFront with Origin Access Control. The browser calls API Gateway directly.
+through an API-key-protected Regional API Gateway REST API for singleton start,
+stop, and status operations. An ACM certificate and Route 53 alias expose its
+`prod` stage at `https://ts-management-api.diogo-nb.com.br/`; the generated
+execute-api endpoint remains enabled for rollback. The independent Vite app is
+deployed from `apps/ts6-management-web/dist` to a private S3 bucket and served
+through CloudFront with Origin Access Control and no custom frontend hostname.
+The browser calls the API Gateway custom hostname directly.
 Read the application runbook before synthesis or
 operation; it includes automatic license acceptance, one-time registrar
 delegation, DNS updates, management-key retrieval, the scaling contract, and

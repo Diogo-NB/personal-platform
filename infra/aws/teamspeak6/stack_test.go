@@ -84,7 +84,7 @@ func TestNewStackTemplate(t *testing.T) {
 			"AvailabilityZoneRebalancing": "DISABLED",
 			"CapacityProviderStrategy": []any{
 				map[string]any{
-					"CapacityProvider": "FARGATE_SPOT",
+					"CapacityProvider": "FARGATE",
 					"Weight":           float64(1),
 				},
 			},
@@ -257,7 +257,7 @@ func TestNewStackTemplate(t *testing.T) {
 				"Version": "2012-10-17",
 			},
 		})
-		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(0))
+		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(1))
 		template.HasOutput(jsii.String("TeamSpeakAddress"), map[string]any{
 			"Value": dnsRecordName,
 		})
@@ -325,8 +325,9 @@ func TestNewStackTemplate(t *testing.T) {
 		template.ResourceCountIs(jsii.String("AWS::Lambda::EventSourceMapping"), jsii.Number(1))
 
 		template.HasResourceProperties(jsii.String("AWS::ApiGateway::RestApi"), map[string]any{
-			"ApiKeySourceType": "HEADER",
-			"Body":             assertions.Match_Absent(),
+			"ApiKeySourceType":          "HEADER",
+			"Body":                      assertions.Match_Absent(),
+			"DisableExecuteApiEndpoint": assertions.Match_Absent(),
 			"EndpointConfiguration": map[string]any{
 				"Types": []any{"REGIONAL"},
 			},
@@ -430,14 +431,43 @@ func TestNewStackTemplate(t *testing.T) {
 				"Version": "2012-10-17",
 			},
 		})
-		for _, resourceType := range []string{
-			"AWS::ApiGateway::BasePathMapping",
-			"AWS::ApiGateway::DomainName",
-			"AWS::Lambda::Url",
-		} {
-			template.ResourceCountIs(jsii.String(resourceType), jsii.Number(0))
-		}
-		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(0))
+		template.HasResourceProperties(jsii.String("AWS::CertificateManager::Certificate"), map[string]any{
+			"DomainName": managementAPIDomainName,
+			"DomainValidationOptions": []any{
+				map[string]any{
+					"DomainName":   managementAPIDomainName,
+					"HostedZoneId": assertions.Match_AnyValue(),
+				},
+			},
+			"ValidationMethod": "DNS",
+		})
+		template.ResourceCountIs(jsii.String("AWS::CertificateManager::Certificate"), jsii.Number(1))
+		template.HasResourceProperties(jsii.String("AWS::ApiGateway::DomainName"), map[string]any{
+			"DomainName": managementAPIDomainName,
+			"EndpointConfiguration": map[string]any{
+				"Types": []any{"REGIONAL"},
+			},
+			"RegionalCertificateArn": assertions.Match_AnyValue(),
+			"SecurityPolicy":         "TLS_1_2",
+		})
+		template.ResourceCountIs(jsii.String("AWS::ApiGateway::DomainName"), jsii.Number(1))
+		template.HasResourceProperties(jsii.String("AWS::ApiGateway::BasePathMapping"), map[string]any{
+			"BasePath":   assertions.Match_Absent(),
+			"DomainName": assertions.Match_AnyValue(),
+			"RestApiId":  assertions.Match_AnyValue(),
+			"Stage":      assertions.Match_AnyValue(),
+		})
+		template.ResourceCountIs(jsii.String("AWS::ApiGateway::BasePathMapping"), jsii.Number(1))
+		template.HasResourceProperties(jsii.String("AWS::Route53::RecordSet"), map[string]any{
+			"AliasTarget": map[string]any{
+				"DNSName":      assertions.Match_AnyValue(),
+				"HostedZoneId": assertions.Match_AnyValue(),
+			},
+			"Name": managementAPIDomainName + ".",
+			"Type": "A",
+		})
+		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(1))
+		template.ResourceCountIs(jsii.String("AWS::Lambda::Url"), jsii.Number(0))
 		assertDistinctApplicationImageAssets(t, template)
 	})
 
@@ -470,6 +500,7 @@ func TestNewStackTemplate(t *testing.T) {
 		})
 		template.HasResourceProperties(jsii.String("AWS::CloudFront::Distribution"), map[string]any{
 			"DistributionConfig": map[string]any{
+				"Aliases": assertions.Match_Absent(),
 				"DefaultCacheBehavior": map[string]any{
 					"AllowedMethods":       []any{"GET", "HEAD", "OPTIONS"},
 					"Compress":             true,
@@ -485,6 +516,7 @@ func TestNewStackTemplate(t *testing.T) {
 						},
 					}),
 				}),
+				"ViewerCertificate": assertions.Match_Absent(),
 			},
 		})
 		template.HasResourceProperties(jsii.String("AWS::S3::BucketPolicy"), map[string]any{
@@ -516,6 +548,11 @@ func TestNewStackTemplate(t *testing.T) {
 			"SourceObjectKeys":  assertions.Match_AnyValue(),
 			"RetainOnDelete":    false,
 		})
+		wantRuntimeConfig := "window.__TS6_RUNTIME_CONFIG__ = Object.freeze({ apiBaseUrl: \"" +
+			managementAPIURL + "\" });\n"
+		if got := managementWebRuntimeConfig(); got != wantRuntimeConfig {
+			t.Errorf("runtime config = %q, want %q", got, wantRuntimeConfig)
+		}
 	})
 
 	t.Run("tags and outputs", func(t *testing.T) {
@@ -543,6 +580,14 @@ func TestNewStackTemplate(t *testing.T) {
 				"Value": assertions.Match_AnyValue(),
 			})
 		}
+		template.HasOutput(jsii.String("ManagementAPIURL"), map[string]any{
+			"Value": managementAPIURL,
+		})
+		template.HasOutput(jsii.String("ManagementWebURL"), map[string]any{
+			"Value": map[string]any{
+				"Fn::Join": assertions.Match_AnyValue(),
+			},
+		})
 
 		outputs, ok := (*template.ToJSON())["Outputs"].(map[string]any)
 		if !ok {
@@ -566,11 +611,15 @@ func TestNewStackTemplate(t *testing.T) {
 			"AWS::ElasticLoadBalancing::LoadBalancer",
 			"AWS::ElasticLoadBalancingV2::LoadBalancer",
 			"AWS::ECR::Repository",
+			"AWS::GlobalAccelerator::Accelerator",
+			"AWS::GlobalAccelerator::EndpointGroup",
+			"AWS::GlobalAccelerator::Listener",
 			"AWS::RDS::DBCluster",
 			"AWS::RDS::DBInstance",
 		} {
 			template.ResourceCountIs(jsii.String(resourceType), jsii.Number(0))
 		}
+		template.ResourceCountIs(jsii.String("AWS::Lambda::Function"), jsii.Number(3))
 	})
 }
 
@@ -653,29 +702,31 @@ func assertCostAllocationTags(
 	t.Helper()
 
 	tagPropertyByResourceType := map[string]string{
-		"AWS::ApiGateway::ApiKey":         "Tags",
-		"AWS::ApiGateway::RestApi":        "Tags",
-		"AWS::ApiGateway::Stage":          "Tags",
-		"AWS::ApiGateway::UsagePlan":      "Tags",
-		"AWS::CloudFront::Distribution":   "Tags",
-		"AWS::EC2::InternetGateway":       "Tags",
-		"AWS::EC2::RouteTable":            "Tags",
-		"AWS::EC2::SecurityGroup":         "Tags",
-		"AWS::EC2::Subnet":                "Tags",
-		"AWS::EC2::VPC":                   "Tags",
-		"AWS::ECS::Cluster":               "Tags",
-		"AWS::ECS::Service":               "Tags",
-		"AWS::ECS::TaskDefinition":        "Tags",
-		"AWS::EFS::AccessPoint":           "AccessPointTags",
-		"AWS::EFS::FileSystem":            "FileSystemTags",
-		"AWS::Events::Rule":               "Tags",
-		"AWS::IAM::Role":                  "Tags",
-		"AWS::Lambda::EventSourceMapping": "Tags",
-		"AWS::Lambda::Function":           "Tags",
-		"AWS::Logs::LogGroup":             "Tags",
-		"AWS::Route53::HostedZone":        "HostedZoneTags",
-		"AWS::S3::Bucket":                 "Tags",
-		"AWS::SQS::Queue":                 "Tags",
+		"AWS::CertificateManager::Certificate": "Tags",
+		"AWS::ApiGateway::ApiKey":              "Tags",
+		"AWS::ApiGateway::DomainName":          "Tags",
+		"AWS::ApiGateway::RestApi":             "Tags",
+		"AWS::ApiGateway::Stage":               "Tags",
+		"AWS::ApiGateway::UsagePlan":           "Tags",
+		"AWS::CloudFront::Distribution":        "Tags",
+		"AWS::EC2::InternetGateway":            "Tags",
+		"AWS::EC2::RouteTable":                 "Tags",
+		"AWS::EC2::SecurityGroup":              "Tags",
+		"AWS::EC2::Subnet":                     "Tags",
+		"AWS::EC2::VPC":                        "Tags",
+		"AWS::ECS::Cluster":                    "Tags",
+		"AWS::ECS::Service":                    "Tags",
+		"AWS::ECS::TaskDefinition":             "Tags",
+		"AWS::EFS::AccessPoint":                "AccessPointTags",
+		"AWS::EFS::FileSystem":                 "FileSystemTags",
+		"AWS::Events::Rule":                    "Tags",
+		"AWS::IAM::Role":                       "Tags",
+		"AWS::Lambda::EventSourceMapping":      "Tags",
+		"AWS::Lambda::Function":                "Tags",
+		"AWS::Logs::LogGroup":                  "Tags",
+		"AWS::Route53::HostedZone":             "HostedZoneTags",
+		"AWS::S3::Bucket":                      "Tags",
+		"AWS::SQS::Queue":                      "Tags",
 	}
 	expected := map[string]string{
 		"Application": application,

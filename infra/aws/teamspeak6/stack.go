@@ -9,6 +9,7 @@ import (
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsapigateway"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awscertificatemanager"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awscloudfront"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awscloudfrontorigins"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsec2"
@@ -22,6 +23,7 @@ import (
 	"github.com/aws/aws-cdk-go/awscdk/v2/awslambdaeventsources"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awslogs"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awsroute53"
+	"github.com/aws/aws-cdk-go/awscdk/v2/awsroute53targets"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awss3"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awss3deployment"
 	"github.com/aws/aws-cdk-go/awscdk/v2/awssqs"
@@ -32,7 +34,9 @@ import (
 const (
 	dataVolumeName            = "teamspeak6-data"
 	domainName                = "diogo-nb.com.br"
-	dnsRecordName             = "ts.diogo-nb.com.br"
+	dnsRecordName             = "ts." + domainName
+	managementAPIDomainName   = "ts-management-api." + domainName
+	managementAPIURL          = "https://" + managementAPIDomainName + "/"
 	dnsRecordTTL              = 60
 	dnsUpdaterScheduleMinutes = 5
 	serviceName               = "teamspeak6"
@@ -57,7 +61,6 @@ type stackOutputResources struct {
 	securityGroup awsec2.SecurityGroup
 	logGroup      awslogs.LogGroup
 	hostedZone    awsroute53.PublicHostedZone
-	managementAPI awsapigateway.RestApi
 	managementKey awsapigateway.IApiKey
 	managementWeb awscloudfront.Distribution
 	commandQueue  awssqs.Queue
@@ -85,7 +88,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 
 	stackProps := props.StackProps
 	stackProps.Description = jsii.String(
-		"Personal TeamSpeak 6 beta server on ECS Fargate Spot with retained EFS state",
+		"Personal TeamSpeak 6 beta server on ECS Fargate with retained EFS state",
 	)
 	stackProps.Tags = costtags.Merge(stackProps.Tags, costtags.ApplicationTeamSpeak6)
 
@@ -267,7 +270,7 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		Cluster: cluster,
 		CapacityProviderStrategies: &[]*awsecs.CapacityProviderStrategy{
 			{
-				CapacityProvider: jsii.String("FARGATE_SPOT"),
+				CapacityProvider: jsii.String("FARGATE"),
 				Weight:           jsii.Number(1),
 			},
 		},
@@ -328,11 +331,11 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		stack,
 		cluster,
 		service,
+		hostedZone,
 		props.ManagementAPIImageAssetDirectory,
 	)
 	managementWeb := newManagementWeb(
 		stack,
-		management.api,
 		props.ManagementWebDirectory,
 	)
 
@@ -344,7 +347,6 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		securityGroup: taskSecurityGroup,
 		logGroup:      logGroup,
 		hostedZone:    hostedZone,
-		managementAPI: management.api,
 		managementKey: management.key,
 		managementWeb: managementWeb,
 		commandQueue:  management.commandQueue,
@@ -355,7 +357,6 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 }
 
 type managementAPIResources struct {
-	api          awsapigateway.RestApi
 	key          awsapigateway.IApiKey
 	commandQueue awssqs.Queue
 	commandDLQ   awssqs.Queue
@@ -365,6 +366,7 @@ func newManagementAPI(
 	stack awscdk.Stack,
 	cluster awsecs.Cluster,
 	service awsecs.FargateService,
+	hostedZone awsroute53.PublicHostedZone,
 	imageAssetDirectory string,
 ) managementAPIResources {
 	logGroup := awslogs.NewLogGroup(stack, jsii.String("ManagementAPILogGroup"), &awslogs.LogGroupProps{
@@ -524,6 +526,30 @@ func newManagementAPI(
 		Stage: api.DeploymentStage(),
 	})
 	usagePlan.AddApiKey(key, nil)
+	certificate := awscertificatemanager.NewCertificate(stack, jsii.String("ManagementAPICertificate"), &awscertificatemanager.CertificateProps{
+		DomainName: jsii.String(managementAPIDomainName),
+		Validation: awscertificatemanager.CertificateValidation_FromDns(hostedZone),
+	})
+	customDomain := awsapigateway.NewDomainName(
+		stack,
+		jsii.String("ManagementAPIDomain"),
+		&awsapigateway.DomainNameProps{
+			Certificate:    certificate,
+			DomainName:     jsii.String(managementAPIDomainName),
+			EndpointType:   awsapigateway.EndpointType_REGIONAL,
+			SecurityPolicy: awsapigateway.SecurityPolicy_TLS_1_2,
+		},
+	)
+	customDomain.AddBasePathMapping(api, &awsapigateway.BasePathMappingOptions{
+		Stage: api.DeploymentStage(),
+	})
+	awsroute53.NewARecord(stack, jsii.String("ManagementAPIAliasRecord"), &awsroute53.ARecordProps{
+		RecordName: jsii.String(managementAPIDomainName),
+		Target: awsroute53.RecordTarget_FromAlias(
+			awsroute53targets.NewApiGatewayDomain(customDomain),
+		),
+		Zone: hostedZone,
+	})
 
 	costtags.ApplyComponent(logGroup, costtags.ComponentManagementAPI)
 	costtags.ApplyComponent(commandDLQ, costtags.ComponentManagementAPI)
@@ -532,9 +558,10 @@ func newManagementAPI(
 	costtags.ApplyComponent(api, costtags.ComponentManagementAPI)
 	costtags.ApplyComponent(key, costtags.ComponentManagementAPI)
 	costtags.ApplyComponent(usagePlan, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(certificate, costtags.ComponentManagementAPI)
+	costtags.ApplyComponent(customDomain, costtags.ComponentManagementAPI)
 
 	return managementAPIResources{
-		api:          api,
 		key:          key,
 		commandQueue: commandQueue,
 		commandDLQ:   commandDLQ,
@@ -543,7 +570,6 @@ func newManagementAPI(
 
 func newManagementWeb(
 	stack awscdk.Stack,
-	api awsapigateway.RestApi,
 	assetDirectory string,
 ) awscloudfront.Distribution {
 	bucket := awss3.NewBucket(stack, jsii.String("ManagementWebBucket"), &awss3.BucketProps{
@@ -567,11 +593,7 @@ func newManagementWeb(
 			},
 		},
 	)
-	runtimeConfig := awscdk.Fn_Join(jsii.String(""), &[]*string{
-		jsii.String("window.__TS6_RUNTIME_CONFIG__ = Object.freeze({ apiBaseUrl: \""),
-		api.Url(),
-		jsii.String("\" });\n"),
-	})
+	runtimeConfig := jsii.String(managementWebRuntimeConfig())
 	deployment := awss3deployment.NewBucketDeployment(
 		stack,
 		jsii.String("ManagementWebDeployment"),
@@ -734,8 +756,8 @@ func newOutputs(stack awscdk.Stack, resources stackOutputResources) {
 		},
 		{
 			id:          "ManagementAPIURL",
-			value:       resources.managementAPI.Url(),
-			description: "TeamSpeak management API prod-stage URL",
+			value:       jsii.String(managementAPIURL),
+			description: "Custom URL for the TeamSpeak management API",
 		},
 		{
 			id:          "ManagementAPIKeyID",
@@ -773,4 +795,9 @@ func newOutputs(stack awscdk.Stack, resources stackOutputResources) {
 			Value:       output.value,
 		})
 	}
+}
+
+func managementWebRuntimeConfig() string {
+	return "window.__TS6_RUNTIME_CONFIG__ = Object.freeze({ apiBaseUrl: \"" +
+		managementAPIURL + "\" });\n"
 }
