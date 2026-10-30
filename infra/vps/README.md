@@ -60,7 +60,8 @@ caps its pool at 20. Give each application an explicit pool size (Prisma:
 `connection_limit` in the URL, e.g. `?connection_limit=10`) and keep the sum
 well below 100.
 
-There are no backups yet; see the backlog in `vps-handoff.md`.
+There are no backups yet; see the backlog in
+[`docs/vps-platform.md`](../../docs/vps-platform.md#backlog).
 
 ## Keycloak
 
@@ -97,10 +98,8 @@ tunnel (verified in a local test with `/admin` blocked), so blocking
 ### Adding a project realm
 
 Create the realm and its clients in the admin console. The issuer is
-`https://auth.diogo-nb.com.br/realms/<realm>`. For InvestFlow, see
-`vps-handoff.md`: realm `investflow`, a confidential client `investflow-api`
-and a public client `investflow-web` with redirect URIs and web origins on
-`https://investflow.diogo-nb.com.br`.
+`https://auth.diogo-nb.com.br/realms/<realm>`. For InvestFlow's realm and
+clients, see [`docs/vps-platform.md`](../../docs/vps-platform.md#investflow).
 
 ## Memory
 
