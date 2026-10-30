@@ -8,7 +8,7 @@ in Dokploy's environment settings.
 | Service | Compose path | Public address |
 |---|---|---|
 | PostgreSQL 17 | `infra/vps/postgres/compose.yaml` | None |
-| Keycloak 26 | `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` (`/realms/`, `/resources/` only) |
+| Keycloak 26 | `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` |
 
 DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
 
@@ -70,23 +70,11 @@ Secrets in Dokploy: `KC_DB_PASSWORD` (the `keycloak` role) and
 `KC_BOOTSTRAP_ADMIN_PASSWORD`. Keycloak creates the temporary bootstrap admin
 only while the master realm has no admin.
 
-Traefik routes only `/realms/` and `/resources/` publicly. The admin console
-is published on the VPS loopback only:
-
-```sh
-ssh -N -L 8080:localhost:8080 vps
-# then open http://localhost:8080/admin
-```
-
-The local port must be 8080, because `KC_HOSTNAME_ADMIN` is
-`http://localhost:8080`; stop anything else listening on 8080 locally first.
-On the VPS, port 8080 is also where Traefik's dashboard would be published:
-leave Dokploy's Traefik dashboard option off.
-
-The master realm's login page stays public. The admin console signs in through
-`https://auth.diogo-nb.com.br/realms/master/...` even when opened through the
-tunnel (verified in a local test with `/admin` blocked), so blocking
-`/realms/master` would break admin sign-in. After the first deploy:
+The public route is set in Dokploy's Domains tab for the service: host
+`auth.diogo-nb.com.br`, path `/`, service `platform-keycloak`, container port
+8080, HTTPS with Let's Encrypt. The whole host is public, including the admin
+console at `https://auth.diogo-nb.com.br/admin`, so the `master` realm's admin
+accounts are protected only by their credentials. After the first deploy:
 
 1. Sign in as the bootstrap admin, create a permanent admin user in `master`
    with OTP required, then delete the bootstrap admin.

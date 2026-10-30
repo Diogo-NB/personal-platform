@@ -20,7 +20,7 @@ DNS stack is described in [`infra/aws/README.md`](../infra/aws/README.md#dns).
 | Dokploy projects  | `platform`: services other projects depend on (PostgreSQL, Keycloak, later monitoring and WireGuard). `personal`: standalone personal apps (TeamSpeak, addy.io, Vaultwarden, Filestash). One more Dokploy project per project repository (`investflow`, …). One environment, `production`, until a project needs `staging`.                     |
 | PostgreSQL        | One shared PostgreSQL 17 instance. **One database and one owner role per project**, created by hand with the superuser using this repository's script. Projects run their own migrations with their own role. Not published on a host port.                                                                                                     |
 | Keycloak          | One shared Keycloak 26 instance, **one realm per project**. Realms, clients and users are configured by hand in the admin console; there are no realm files or configuration tooling in production. Production mode, capped heap, `KC_CACHE=local`, container memory limit.                                                                     |
-| Keycloak exposure | Only `/realms/` and `/resources/` are routed publicly. `/admin` is published on the VPS loopback and reached through an SSH tunnel, so a leaked admin password or token cannot be used from the internet. The `master` login page stays public because the admin console signs in through it; it is protected by OTP and brute-force detection. |
+| Keycloak exposure | The whole `auth.diogo-nb.com.br` host is routed publicly through Dokploy's Domains tab, including the admin console. Admin accounts in `master` require OTP, and brute-force detection is on. |
 | Shared network    | One Docker network, `platform-internal`, created by the PostgreSQL compose file and joined as `external` by everything else. Only the shared services and the project containers that need PostgreSQL join it. Projects reach Keycloak through its public hostname, since tokens carry it as `iss`.                                                                                                                        |
 | Websites          | Served from the VPS: an nginx container per site on the same domain as its API, with Traefik routing `/` to the web container and `/api` to the API. S3 + CloudFront only for a site that must stay up when the VPS is down.                                                                                                                    |
 | AWS               | The only cloud provider. Route 53 (zone `diogo-nb.com.br`), S3 for backups, SES for addy.io's outbound mail (Hostinger caps outbound mail at 5 messages per minute), and each project's EventBridge and SQS in `sa-east-1`. One IAM user per project, scoped to its own resources.                                                              |
@@ -64,7 +64,7 @@ host; uncapped, it passed 900 MB in local tests.
 | Swap          | 2 GB `/swapfile` in `/etc/fstab`, `vm.swappiness=10`                                                                                                                                                                                                                                                                        |
 | Docker        | 28.5.0, held with `apt-mark hold`; Docker upgrades are manual.                                                                                                                                                                                                                                                              |
 | Dokploy       | Installed with the official script. The Swarm address pool is `10.20.0.0/16` with `/24` networks so it does not overlap wg-easy's `10.8.0.0/24`.                                                                                                                                                                            |
-| Dokploy panel | Public at `dokploy.diogo-nb.com.br`, behind password and 2FA, so CI can reach the deploy webhooks. Also reachable with `ssh -N -L 3300:localhost:3000 vps` at `http://localhost:3300`. Keep Dokploy's Traefik dashboard off: it would take host port 8080, which the Keycloak admin tunnel uses.                            |
+| Dokploy panel | Public at `dokploy.diogo-nb.com.br`, behind password and 2FA, so CI can reach the deploy webhooks. Also reachable with `ssh -N -L 3300:localhost:3000 vps` at `http://localhost:3300`.                            |
 
 ## Adding a project
 
@@ -102,8 +102,7 @@ Requirements read from the InvestFlow repository (`docker-compose.yml`,
 - **Still to do in the InvestFlow repository:** `deploy/compose.yaml`, GitHub
   Actions workflows that build and push images and call the deploy webhook,
   and infrastructure as code for its production EventBridge, SQS and IAM
-  user. Locally these only exist through Floci. Its local Keycloak must move
-  off port 8080, which the production admin tunnel uses.
+  user. Locally these only exist through Floci.
 
 ## Open tasks
 
@@ -135,5 +134,8 @@ Platform:
   Dokploy updated.
 - **PostgreSQL backups.** None yet. Start with a daily `pg_dump` per database
   to S3; consider WAL archiving (WAL-G or pgBackRest) later.
-- **WireGuard.** Replace the SSH tunnels for the Keycloak admin console and the
-  Dokploy panel.
+- **Keycloak admin exposure.** The admin console is public. If that becomes a
+  concern, route only `/realms/` and `/resources/` publicly and reach `/admin`
+  through WireGuard or an SSH tunnel (`KC_HOSTNAME_ADMIN`). The admin console
+  signs in through `/realms/master`, so that path must stay public.
+- **WireGuard.** Private access to the Dokploy panel and admin consoles.
