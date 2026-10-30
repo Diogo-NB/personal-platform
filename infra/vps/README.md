@@ -25,11 +25,9 @@ so shared services use unique names (`platform-postgres`,
 as `postgres` or `api`. Projects are isolated from each other by Postgres
 roles, not by the network.
 
-Create the network once, before the first deploy:
-
-```sh
-sudo docker network create platform-internal
-```
+The Postgres compose file creates the network on its first deploy; every other
+compose file joins it as `external`. Deploy Postgres before anything that uses
+the network.
 
 ## PostgreSQL
 

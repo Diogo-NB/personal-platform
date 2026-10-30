@@ -23,5 +23,7 @@ volumes:
   platform-postgres-data:
 
 networks:
+  # Owned here, not external, so Postgres's first deploy creates it. Every
+  # other compose file joins it with `external: true`.
   platform-internal:
-    external: true
+    name: platform-internal

@@ -10,23 +10,23 @@ DNS stack is described in [`infra/aws/README.md`](../infra/aws/README.md#dns).
 
 ## Decisions
 
-| Topic | Decision |
-|---|---|
-| Hosting | Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe) in São Paulo, 24-month prepaid term, auto-renewal off. It can be upgraded in place to KVM 4 from hPanel. Compare providers about two months before the term ends. |
-| OS | Ubuntu 24.04 LTS, plain image. Hostinger's Docker Manager and Monarx add-ons are not used. |
-| Deploys | Dokploy. Every service is a Dokploy **Compose** service that reads its `compose.yaml` from Git; only secrets live in Dokploy. Compose mode, not Swarm Stack, so `depends_on: condition: service_completed_successfully` works for one-shot jobs such as migrations. |
-| Images | Built in GitHub Actions and pushed to GHCR; CI then calls the service's Dokploy deploy webhook. Nothing is built on the VPS. |
-| Repositories | Anything used by more than one project lives in this repository, along with personal apps. Anything used by one project lives in that project's repository: its app, Dockerfiles, `deploy/compose.yaml`, migrations and AWS resources. |
-| Dokploy projects | `platform`: services other projects depend on (PostgreSQL, Keycloak, later monitoring and WireGuard). `personal`: standalone personal apps (TeamSpeak, addy.io, Vaultwarden, Filestash). One more Dokploy project per project repository (`investflow`, …). One environment, `production`, until a project needs `staging`. |
-| PostgreSQL | One shared PostgreSQL 17 instance. **One database and one owner role per project**, created by hand with the superuser using this repository's script. Projects run their own migrations with their own role. Not published on a host port. |
-| Keycloak | One shared Keycloak 26 instance, **one realm per project**. Realms, clients and users are configured by hand in the admin console; there are no realm files or configuration tooling in production. Production mode, capped heap, `KC_CACHE=local`, container memory limit. |
+| Topic             | Decision                                                                                                                                                                                                                                                                                                                                        |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hosting           | Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe) in São Paulo, 24-month prepaid term, auto-renewal off. It can be upgraded in place to KVM 4 from hPanel. Compare providers about two months before the term ends.                                                                                                                               |
+| OS                | Ubuntu 24.04 LTS, plain image. Hostinger's Docker Manager and Monarx add-ons are not used.                                                                                                                                                                                                                                                      |
+| Deploys           | Dokploy. Every service is a Dokploy **Compose** service that reads its `compose.yaml` from Git; only secrets live in Dokploy. Compose mode, not Swarm Stack, so `depends_on: condition: service_completed_successfully` works for one-shot jobs such as migrations.                                                                             |
+| Images            | Built in GitHub Actions and pushed to GHCR; CI then calls the service's Dokploy deploy webhook. Nothing is built on the VPS.                                                                                                                                                                                                                    |
+| Repositories      | Anything used by more than one project lives in this repository, along with personal apps. Anything used by one project lives in that project's repository: its app, Dockerfiles, `deploy/compose.yaml`, migrations and AWS resources.                                                                                                          |
+| Dokploy projects  | `platform`: services other projects depend on (PostgreSQL, Keycloak, later monitoring and WireGuard). `personal`: standalone personal apps (TeamSpeak, addy.io, Vaultwarden, Filestash). One more Dokploy project per project repository (`investflow`, …). One environment, `production`, until a project needs `staging`.                     |
+| PostgreSQL        | One shared PostgreSQL 17 instance. **One database and one owner role per project**, created by hand with the superuser using this repository's script. Projects run their own migrations with their own role. Not published on a host port.                                                                                                     |
+| Keycloak          | One shared Keycloak 26 instance, **one realm per project**. Realms, clients and users are configured by hand in the admin console; there are no realm files or configuration tooling in production. Production mode, capped heap, `KC_CACHE=local`, container memory limit.                                                                     |
 | Keycloak exposure | Only `/realms/` and `/resources/` are routed publicly. `/admin` is published on the VPS loopback and reached through an SSH tunnel, so a leaked admin password or token cannot be used from the internet. The `master` login page stays public because the admin console signs in through it; it is protected by OTP and brute-force detection. |
-| Shared network | One external Docker network, `platform-internal`. Only the shared services and the project containers that need PostgreSQL join it. Projects reach Keycloak through its public hostname, since tokens carry it as `iss`. |
-| Websites | Served from the VPS: an nginx container per site on the same domain as its API, with Traefik routing `/` to the web container and `/api` to the API. S3 + CloudFront only for a site that must stay up when the VPS is down. |
-| AWS | The only cloud provider. Route 53 (zone `diogo-nb.com.br`), S3 for backups, SES for addy.io's outbound mail (Hostinger caps outbound mail at 5 messages per minute), and each project's EventBridge and SQS in `sa-east-1`. One IAM user per project, scoped to its own resources. |
-| DNS | Route 53 stays authoritative, managed by CDK in `PersonalPlatformDnsStack`, which owns the zone. `vps.diogo-nb.com.br` is the only record holding the server address; every service name is an alias record to it, so changing servers changes one value. |
-| TLS | Traefik obtains and renews Let's Encrypt certificates through the HTTP challenge on port 80. A hostname must resolve to the VPS before its service is deployed. |
-| Memory | Every container has a memory limit. Node apps set `--max-old-space-size` below it; Keycloak sets `JAVA_OPTS_KC_HEAP`. |
+| Shared network    | One Docker network, `platform-internal`, created by the PostgreSQL compose file and joined as `external` by everything else. Only the shared services and the project containers that need PostgreSQL join it. Projects reach Keycloak through its public hostname, since tokens carry it as `iss`.                                                                                                                        |
+| Websites          | Served from the VPS: an nginx container per site on the same domain as its API, with Traefik routing `/` to the web container and `/api` to the API. S3 + CloudFront only for a site that must stay up when the VPS is down.                                                                                                                    |
+| AWS               | The only cloud provider. Route 53 (zone `diogo-nb.com.br`), S3 for backups, SES for addy.io's outbound mail (Hostinger caps outbound mail at 5 messages per minute), and each project's EventBridge and SQS in `sa-east-1`. One IAM user per project, scoped to its own resources.                                                              |
+| DNS               | Route 53 stays authoritative, managed by CDK in `PersonalPlatformDnsStack`, which owns the zone. `vps.diogo-nb.com.br` is the only record holding the server address; every service name is an alias record to it, so changing servers changes one value.                                                                                       |
+| TLS               | Traefik obtains and renews Let's Encrypt certificates through the HTTP challenge on port 80. A hostname must resolve to the VPS before its service is deployed.                                                                                                                                                                                 |
+| Memory            | Every container has a memory limit. Node apps set `--max-old-space-size` below it; Keycloak sets `JAVA_OPTS_KC_HEAP`.                                                                                                                                                                                                                           |
 
 Domains in use: `auth.diogo-nb.com.br` (Keycloak), `dokploy.diogo-nb.com.br`
 (Dokploy panel), `investflow.diogo-nb.com.br` (InvestFlow).
@@ -36,16 +36,16 @@ Domains in use: `auth.diogo-nb.com.br` (Keycloak), `dokploy.diogo-nb.com.br`
 The KVM 2 plan has 7.8 GiB usable. Figures were measured locally unless marked
 otherwise.
 
-| Service | Limit | Typical use |
-|---|---|---|
-| OS + Docker + Dokploy + Traefik | — | ~1.5 GB (reported) |
-| PostgreSQL | 1 GiB | ~0.07–0.3 GB |
-| Keycloak (heap ≤ 384 MiB) | 768 MiB | ~490 MiB after startup |
-| NestJS API (heap 256 MB) | 384 MB | ~170 MB idle |
-| Web (nginx) | 32 MB | ~10 MB |
-| TeamSpeak 6 | 256 MB | ~150 MB |
-| addy.io + MariaDB + Redis, Rspamd on | 512 MB | ~410 MB |
-| **Core total** | | **~3.7 GB, about half the host free** |
+| Service                              | Limit   | Typical use                           |
+| ------------------------------------ | ------- | ------------------------------------- |
+| OS + Docker + Dokploy + Traefik      | —       | ~1.5 GB (reported)                    |
+| PostgreSQL                           | 1 GiB   | ~0.07–0.3 GB                          |
+| Keycloak (heap ≤ 384 MiB)            | 768 MiB | ~490 MiB after startup                |
+| NestJS API (heap 256 MB)             | 384 MB  | ~170 MB idle                          |
+| Web (nginx)                          | 32 MB   | ~10 MB                                |
+| TeamSpeak 6                          | 256 MB  | ~150 MB                               |
+| addy.io + MariaDB + Redis, Rspamd on | 512 MB  | ~410 MB                               |
+| **Core total**                       |         | **~3.7 GB, about half the host free** |
 
 Keycloak's image sets `-XX:InitialRAMPercentage=50 -XX:MaxRAMPercentage=70`.
 Without an explicit heap and container limit it can grow to about 70% of the
@@ -53,18 +53,18 @@ host; uncapped, it passed 900 MB in local tests.
 
 ## Server
 
-| Item | Configuration |
-|---|---|
-| Host | `srv2112481.hstgr.cloud`, `187.41.107.80`, Ubuntu 24.04.5, 2 vCPU, 7.8 GiB RAM, 96 GB disk |
-| Updates | unattended-upgrades for security updates only, without automatic reboot |
-| Users | `diogo` (sudo) for everyday use. Root login is key-only. |
-| SSH | Key `~/.ssh/hostinger_vps`; aliases `vps` (diogo) and `vps-root` in `~/.ssh/config` |
-| sshd | `/etc/ssh/sshd_config.d/00-hardening.conf` sets `PasswordAuthentication no`, `KbdInteractiveAuthentication no` and `PermitRootLogin prohibit-password`. The `00-` prefix matters: `50-cloud-init.conf` sets `PasswordAuthentication yes`, and sshd keeps the first value it reads. |
-| Firewall | Hostinger's panel firewall, because Docker bypasses UFW. TCP 22, 80 and 443 are allowed; everything else is dropped, which is why closed ports show as `filtered` in nmap. Open later as needed: 9987/UDP and 30033/TCP (TeamSpeak), 25/TCP (addy.io), 51820/UDP (WireGuard). Never open 3000 (Dokploy) or the Swarm ports. |
-| Swap | 2 GB `/swapfile` in `/etc/fstab`, `vm.swappiness=10` |
-| Docker | 28.5.0, held with `apt-mark hold`; Docker upgrades are manual. |
-| Dokploy | Installed with the official script. The Swarm address pool is `10.20.0.0/16` with `/24` networks so it does not overlap wg-easy's `10.8.0.0/24`. |
-| Dokploy panel | Public at `dokploy.diogo-nb.com.br`, behind password and 2FA, so CI can reach the deploy webhooks. Also reachable with `ssh -N -L 3300:localhost:3000 vps` at `http://localhost:3300`. Keep Dokploy's Traefik dashboard off: it would take host port 8080, which the Keycloak admin tunnel uses. |
+| Item          | Configuration                                                                                                                                                                                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host          | `srv2112481.hstgr.cloud`, `187.41.107.80`, Ubuntu 24.04.5, 2 vCPU, 7.8 GiB RAM, 96 GB disk                                                                                                                                                                                                                                  |
+| Updates       | unattended-upgrades for security updates only, without automatic reboot                                                                                                                                                                                                                                                     |
+| Users         | `diogo` (sudo) for everyday use. Root login is key-only.                                                                                                                                                                                                                                                                    |
+| SSH           | Key `~/.ssh/hostinger_vps`; aliases `vps` (diogo) and `vps-root` in `~/.ssh/config`                                                                                                                                                                                                                                         |
+| sshd          | `/etc/ssh/sshd_config.d/00-hardening.conf` sets `PasswordAuthentication no`, `KbdInteractiveAuthentication no` and `PermitRootLogin prohibit-password`. The `00-` prefix matters: `50-cloud-init.conf` sets `PasswordAuthentication yes`, and sshd keeps the first value it reads.                                          |
+| Firewall      | Hostinger's panel firewall, because Docker bypasses UFW. TCP 22, 80 and 443 are allowed; everything else is dropped, which is why closed ports show as `filtered` in nmap. Open later as needed: 9987/UDP and 30033/TCP (TeamSpeak), 25/TCP (addy.io), 51820/UDP (WireGuard). Never open 3000 (Dokploy) or the Swarm ports. |
+| Swap          | 2 GB `/swapfile` in `/etc/fstab`, `vm.swappiness=10`                                                                                                                                                                                                                                                                        |
+| Docker        | 28.5.0, held with `apt-mark hold`; Docker upgrades are manual.                                                                                                                                                                                                                                                              |
+| Dokploy       | Installed with the official script. The Swarm address pool is `10.20.0.0/16` with `/24` networks so it does not overlap wg-easy's `10.8.0.0/24`.                                                                                                                                                                            |
+| Dokploy panel | Public at `dokploy.diogo-nb.com.br`, behind password and 2FA, so CI can reach the deploy webhooks. Also reachable with `ssh -N -L 3300:localhost:3000 vps` at `http://localhost:3300`. Keep Dokploy's Traefik dashboard off: it would take host port 8080, which the Keycloak admin tunnel uses.                            |
 
 ## Adding a project
 
