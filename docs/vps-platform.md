@@ -14,14 +14,14 @@ DNS stack is described in [`infra/aws/README.md`](../infra/aws/README.md#dns).
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Hosting           | Hostinger KVM 2 (2 vCPU, 8 GB RAM, 100 GB NVMe) in São Paulo, 24-month prepaid term, auto-renewal off. It can be upgraded in place to KVM 4 from hPanel. Compare providers about two months before the term ends.                                                                                                                               |
 | OS                | Ubuntu 24.04 LTS, plain image. Hostinger's Docker Manager and Monarx add-ons are not used.                                                                                                                                                                                                                                                      |
-| Deploys           | Dokploy. Every service is a Dokploy **Compose** service that reads its `compose.yaml` from Git; only secrets live in Dokploy. Compose mode, not Swarm Stack, so `depends_on: condition: service_completed_successfully` works for one-shot jobs such as migrations.                                                                             |
+| Deploys           | Dokploy. Every application service is a Dokploy **Compose** service that reads its `compose.yaml` from Git; only secrets live in Dokploy. Compose mode, not Swarm Stack, so `depends_on: condition: service_completed_successfully` works for one-shot jobs such as migrations. PostgreSQL is the exception: it uses Dokploy's built-in Database service, for its managed backups. |
 | Images            | Built in GitHub Actions and pushed to GHCR; CI then calls the service's Dokploy deploy webhook. Nothing is built on the VPS.                                                                                                                                                                                                                    |
 | Repositories      | Anything used by more than one project lives in this repository, along with personal apps. Anything used by one project lives in that project's repository: its app, Dockerfiles, `deploy/compose.yaml`, migrations and AWS resources.                                                                                                          |
 | Dokploy projects  | `platform`: services other projects depend on (PostgreSQL, Keycloak, later monitoring and WireGuard). `personal`: standalone personal apps (TeamSpeak, addy.io, Vaultwarden, Filestash). One more Dokploy project per project repository (`investflow`, …). One environment, `production`, until a project needs `staging`.                     |
-| PostgreSQL        | One shared PostgreSQL 17 instance. **One database and one owner role per project**, created by hand with the superuser using this repository's script. Projects run their own migrations with their own role. Not published on a host port.                                                                                                     |
+| PostgreSQL        | One shared PostgreSQL 17 instance, a Dokploy Database service named `platform-postgres`. **One database and one owner role per project**, created by hand with the superuser using this repository's script. Projects run their own migrations with their own role. No external port. |
 | Keycloak          | One shared Keycloak 26 instance, **one realm per project**. Realms, clients and users are configured by hand in the admin console; there are no realm files or configuration tooling in production. Production mode, capped heap, `KC_CACHE=local`, container memory limit.                                                                     |
 | Keycloak exposure | The whole `auth.diogo-nb.com.br` host is routed publicly through Dokploy's Domains tab, including the admin console. Admin accounts in `master` require OTP, and brute-force detection is on. |
-| Shared network    | One Docker network, `platform-internal`, created by the PostgreSQL compose file and joined as `external` by everything else. Only the shared services and the project containers that need PostgreSQL join it. Projects reach Keycloak through its public hostname, since tokens carry it as `iss`.                                                                                                                        |
+| Shared network    | Dokploy's `dokploy-network`. PostgreSQL is reachable on it as `platform-postgres`; project containers that need it join it. Projects reach Keycloak through its public hostname, since tokens carry it as `iss`. |
 | Websites          | Served from the VPS: an nginx container per site on the same domain as its API, with Traefik routing `/` to the web container and `/api` to the API. S3 + CloudFront only for a site that must stay up when the VPS is down.                                                                                                                    |
 | AWS               | The only cloud provider. Route 53 (zone `diogo-nb.com.br`), S3 for backups, SES for addy.io's outbound mail (Hostinger caps outbound mail at 5 messages per minute), and each project's EventBridge and SQS in `sa-east-1`. One IAM user per project, scoped to its own resources.                                                              |
 | DNS               | Route 53 stays authoritative, managed by CDK in `PersonalPlatformDnsStack`, which owns the zone. `vps.diogo-nb.com.br` is the only record holding the server address; every service name is an alias record to it, so changing servers changes one value.                                                                                       |
@@ -72,7 +72,7 @@ A project that uses the shared services needs:
 
 1. A database and owner role, created with
    `infra/vps/postgres/create-project.sql` (see the runbook).
-2. Its Postgres-facing containers on `platform-internal`, with unique service
+2. Its Postgres-facing containers on `dokploy-network`, with unique service
    names, connecting to `platform-postgres:5432` with an explicit pool size.
    `max_connections` (100) is shared; Keycloak uses up to 20.
 3. A Keycloak realm created by hand, with issuer
@@ -98,7 +98,8 @@ Requirements read from the InvestFlow repository (`docker-compose.yml`,
   not request the roles scope. The realm export in InvestFlow's
   `infra/keycloak/realms/` is for local development only: it seeds the public
   account `investflow-dev` and must never be imported in production.
-- **Network:** `api` and `migrate` join `platform-internal`; `web` does not.
+- **Network:** `api` and `migrate` join `dokploy-network` to reach
+  `platform-postgres`.
 - **Still to do in the InvestFlow repository:** `deploy/compose.yaml`, GitHub
   Actions workflows that build and push images and call the deploy webhook,
   and infrastructure as code for its production EventBridge, SQS and IAM
@@ -132,8 +133,9 @@ Platform:
   through certificate transparency logs. Route only the webhook path publicly
   and keep the panel behind the SSH tunnel or WireGuard. Until then, keep
   Dokploy updated.
-- **PostgreSQL backups.** None yet. Start with a daily `pg_dump` per database
-  to S3; consider WAL archiving (WAL-G or pgBackRest) later.
+- **PostgreSQL backups.** None yet. Configure Dokploy's database backups: an
+  S3 destination (with its own IAM user, scoped to one bucket prefix) and a
+  daily schedule. Consider WAL archiving (WAL-G or pgBackRest) later.
 - **Keycloak admin exposure.** The admin console is public. If that becomes a
   concern, route only `/realms/` and `/resources/` publicly and reach `/admin`
   through WireGuard or an SSH tunnel (`KC_HOSTNAME_ADMIN`). The admin console

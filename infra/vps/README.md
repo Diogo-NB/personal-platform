@@ -1,45 +1,45 @@
 # Shared VPS services
 
-Shared services that run on the VPS and that other projects depend on. Each
-directory is one Dokploy **Compose** service in the Dokploy project
-`platform`, reading its `compose.yaml` from this repository. Only secrets live
-in Dokploy's environment settings.
+Shared services that run on the VPS and that other projects depend on, all in
+the Dokploy project `platform`. Only secrets live in Dokploy's environment
+settings.
 
-| Service | Compose path | Public address |
+| Service | Dokploy service type | Public address |
 |---|---|---|
-| PostgreSQL 17 | `infra/vps/postgres/compose.yaml` | None |
-| Keycloak 26 | `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` |
+| PostgreSQL 17 | Dokploy Database (PostgreSQL), app name `platform-postgres` | None |
+| Keycloak 26 | Compose, `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` |
 
 DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
 
 ## Network
 
-Projects reach Postgres over one external Docker network, `platform-internal`.
-Only the shared services and the project containers that need Postgres join
-it (for InvestFlow: `api` and `migrate`, not `web`). Projects reach Keycloak
+Shared services and projects meet on Dokploy's `dokploy-network`, the network
+Traefik routes through. PostgreSQL is reachable on it as `platform-postgres`;
+project containers that need it join `dokploy-network` as an external network
+(most already do, because their domain requires it). Projects reach Keycloak
 through its public hostname, because tokens carry it as `iss`.
 
 Every container on the network resolves every other container's service name,
-so shared services use unique names (`platform-postgres`,
-`platform-keycloak`). Never give a service on this network a generic name such
-as `postgres` or `api`. Projects are isolated from each other by Postgres
-roles, not by the network.
-
-The Postgres compose file creates the network on its first deploy; every other
-compose file joins it as `external`. Deploy Postgres before anything that uses
-the network.
+so services use unique names (`platform-postgres`, `platform-keycloak`). Never
+give a service a generic name such as `postgres` or `api`. Projects are
+isolated from each other by Postgres roles, not by the network.
 
 ## PostgreSQL
 
-Secrets in Dokploy: `POSTGRES_PASSWORD` (the `postgres` superuser).
+A Dokploy Database service: image `postgres:17-alpine`, app name
+`platform-postgres`, database user `postgres` (the superuser), no external
+port, memory limit 1 GiB. Its configuration lives in Dokploy, not in Git.
 
 Each project gets one login role and one database it owns, both named after
-the project. Create them with the superuser; the script prompts for the
-role's password and sends it hashed:
+the project. Create them with the superuser and
+[`postgres/create-project.sql`](postgres/create-project.sql), which prompts
+for the role's password and sends it hashed. From this repository:
 
 ```sh
-sudo docker exec -it "$(sudo docker ps -qf name=platform-postgres)" \
-  psql -U postgres -v project=<name> -f /opt/platform/create-project.sql
+ssh vps 'cat > /tmp/create-project.sql' < infra/vps/postgres/create-project.sql
+ssh -t vps 'c=$(sudo docker ps -qf name=platform-postgres) &&
+  sudo docker cp /tmp/create-project.sql "$c":/tmp/create-project.sql &&
+  sudo docker exec -it "$c" psql -U postgres -v project=<name> -f /tmp/create-project.sql'
 ```
 
 Run it for `keycloak` before deploying Keycloak, and for each project before
@@ -47,7 +47,7 @@ its first deploy. The script removes the default `PUBLIC` access to the new
 database, so one project's role cannot connect to another project's database.
 Projects then run their own migrations with their own role.
 
-Connection string for a project container on `platform-internal`:
+Connection string for a project container on `dokploy-network`:
 
 ```
 postgresql://<name>:<password>@platform-postgres:5432/<name>
@@ -58,7 +58,8 @@ caps its pool at 20. Give each application an explicit pool size (Prisma:
 `connection_limit` in the URL, e.g. `?connection_limit=10`) and keep the sum
 well below 100.
 
-There are no backups yet; see the backlog in
+Backups are not configured yet. Dokploy's database backups (scheduled
+`pg_dump` to an S3 destination) are the planned approach; see the backlog in
 [`docs/vps-platform.md`](../../docs/vps-platform.md#backlog).
 
 ## Keycloak

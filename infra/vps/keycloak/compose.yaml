@@ -23,7 +23,6 @@ services:
     # Domains tab, which adds the Traefik labels at deploy time.
     networks:
       - dokploy-network
-      - platform-internal
     deploy:
       resources:
         limits:
@@ -31,6 +30,4 @@ services:
 
 networks:
   dokploy-network:
-    external: true
-  platform-internal:
     external: true
