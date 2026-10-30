@@ -1,0 +1,51 @@
+services:
+  platform-keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: start
+    restart: unless-stopped
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://platform-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?set in Dokploy}
+      # Keycloak's default pool of 100 would take every connection the shared
+      # Postgres allows.
+      KC_DB_POOL_MAX_SIZE: 20
+      KC_HOSTNAME: https://auth.diogo-nb.com.br
+      # The admin console is served only through the SSH tunnel; this must
+      # match the local end of that tunnel.
+      KC_HOSTNAME_ADMIN: http://localhost:8080
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_CACHE: local
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-bootstrap-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?set in Dokploy}
+      # Replaces the image's percentage-based heap, which grows with the host.
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx384m
+    ports:
+      - 127.0.0.1:8080:8080
+    networks:
+      - dokploy-network
+      - platform-internal
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.services.platform-keycloak.loadbalancer.server.port=8080
+      # Only the endpoints applications and browsers need are public; /admin
+      # stays reachable only through the tunnel.
+      - traefik.http.routers.platform-keycloak.rule=Host(`auth.diogo-nb.com.br`) && (PathPrefix(`/realms/`) || PathPrefix(`/resources/`))
+      - traefik.http.routers.platform-keycloak.entrypoints=websecure
+      - traefik.http.routers.platform-keycloak.tls.certresolver=letsencrypt
+      - traefik.http.routers.platform-keycloak-http.rule=Host(`auth.diogo-nb.com.br`)
+      - traefik.http.routers.platform-keycloak-http.entrypoints=web
+      - traefik.http.routers.platform-keycloak-http.middlewares=redirect-to-https@file
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+networks:
+  dokploy-network:
+    external: true
+  platform-internal:
+    external: true

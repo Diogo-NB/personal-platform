@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"aws/dns"
 	"aws/storage"
 	"aws/teamspeak6"
 
@@ -24,6 +25,18 @@ func main() {
 				Env: &awscdk.Environment{
 					Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
 					Region:  jsii.String("us-east-1"),
+				},
+			},
+		},
+	)
+
+	dns.NewStack(
+		app,
+		"PersonalPlatformDnsStack",
+		&dns.StackProps{
+			StackProps: awscdk.StackProps{
+				Env: &awscdk.Environment{
+					Region: jsii.String("sa-east-1"),
 				},
 			},
 		},
@@ -64,8 +77,14 @@ func main() {
 			DNSUpdaterImageAssetDirectory:    dnsUpdaterImageAssetDirectory,
 			ManagementAPIImageAssetDirectory: managementAPIImageAssetDirectory,
 			ManagementWebDirectory:           managementWebDirectory,
+			HostedZoneID:                     hostedZoneID(app),
 		},
 	)
 
 	app.Synth(nil)
+}
+
+func hostedZoneID(app awscdk.App) string {
+	id, _ := app.Node().TryGetContext(jsii.String("hostedZoneId")).(string)
+	return id
 }

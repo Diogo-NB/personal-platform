@@ -60,8 +60,8 @@ The CDK stack is `PersonalPlatformTeamspeak6Stack`. It creates:
   `9987`, mounted read-write at `/var/tsserver` with TLS and IAM authorization.
 - A CloudWatch log group named `/personal-platform/teamspeak6` with seven-day
   retention.
-- A retained Route 53 public hosted zone for `diogo-nb.com.br`, an EventBridge
-  rule, and a small Go Lambda container that keeps `ts.diogo-nb.com.br` pointed
+- A reference to the `diogo-nb.com.br` Route 53 public hosted zone owned by
+  `PersonalPlatformDnsStack`, an EventBridge rule, and a small Go Lambda container that keeps `ts.diogo-nb.com.br` pointed
   at the current running task.
 - A regional API Gateway REST API and 128 MiB Go Lambda container for starting,
   stopping, and reporting the status of the singleton ECS service. All three
@@ -416,11 +416,14 @@ interleave with queue commands under the existing last-accepted-write behavior.
 ## DNS setup and automatic updates
 
 The TeamSpeak client address is `ts.diogo-nb.com.br`, and the management API
-address is `ts-management-api.diogo-nb.com.br`. The stack creates a Route 53
-public hosted zone for `diogo-nb.com.br`, but Registro.br remains the domain
-registrar. Route 53 becomes authoritative only after this one-time delegation:
+address is `ts-management-api.diogo-nb.com.br`. The Route 53 public hosted zone
+for `diogo-nb.com.br` is owned by `PersonalPlatformDnsStack`
+([infra/aws](../../infra/aws/README.md)); this stack references it by the
+`hostedZoneId` CDK context value. Registro.br remains the domain registrar.
+Route 53 becomes authoritative only after this one-time delegation, which is
+already done:
 
-1. Deploy the stack and copy the four values from its `NameServers` output.
+1. Copy the four values from the DNS stack's `NameServers` output.
 2. If the domain already has records for a website, email, or another service,
    reproduce them in Route 53 before continuing.
 3. Registro.br enables DNSSEC automatically when its own DNS servers are in
@@ -448,10 +451,9 @@ replacement can take roughly the task startup time plus DNS-cache expiry to
 become reachable everywhere. The periodic run also creates the first record
 for a task that was already running when DNS was deployed.
 
-The hosted zone has a retain policy. Deleting the CloudFormation stack does
-not delete the zone, its DNS records, or its ongoing hosted-zone charge. If the
-zone is ever intentionally replaced, Registro.br must be delegated to the new
-four nameservers.
+Deleting this stack does not affect the hosted zone. The DNS stack retains the
+zone; if it is ever intentionally replaced, Registro.br must be delegated to
+the new four nameservers.
 
 ## First deployment acceptance
 

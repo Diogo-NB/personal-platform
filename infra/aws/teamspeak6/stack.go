@@ -51,6 +51,8 @@ type StackProps struct {
 	DNSUpdaterImageAssetDirectory    string
 	ManagementAPIImageAssetDirectory string
 	ManagementWebDirectory           string
+	// HostedZoneID references the zone owned by the DNS stack.
+	HostedZoneID string
 }
 
 type stackOutputResources struct {
@@ -60,7 +62,7 @@ type stackOutputResources struct {
 	accessPoint   awsefs.AccessPoint
 	securityGroup awsec2.SecurityGroup
 	logGroup      awslogs.LogGroup
-	hostedZone    awsroute53.PublicHostedZone
+	hostedZone    awsroute53.IPublicHostedZone
 	managementKey awsapigateway.IApiKey
 	managementWeb awscloudfront.Distribution
 	commandQueue  awssqs.Queue
@@ -84,6 +86,9 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 	}
 	if props.ManagementWebDirectory == "" {
 		panic("teamspeak6: management web directory is required")
+	}
+	if props.HostedZoneID == "" {
+		panic("teamspeak6: hosted zone id is required")
 	}
 
 	stackProps := props.StackProps
@@ -182,16 +187,14 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 		Vpc:                 vpc,
 	})
 	costtags.ApplyComponent(cluster, costtags.ComponentServer)
-	hostedZone := awsroute53.NewPublicHostedZone(
+	hostedZone := awsroute53.PublicHostedZone_FromPublicHostedZoneAttributes(
 		stack,
 		jsii.String("HostedZone"),
-		&awsroute53.PublicHostedZoneProps{
-			Comment:  jsii.String("Personal domain DNS managed by the TeamSpeak infrastructure stack"),
-			ZoneName: jsii.String(domainName),
+		&awsroute53.PublicHostedZoneAttributes{
+			HostedZoneId: jsii.String(props.HostedZoneID),
+			ZoneName:     jsii.String(domainName),
 		},
 	)
-	hostedZone.ApplyRemovalPolicy(awscdk.RemovalPolicy_RETAIN)
-	costtags.ApplyComponent(hostedZone, costtags.ComponentServer)
 
 	taskDefinition := awsecs.NewFargateTaskDefinition(
 		stack,
@@ -366,7 +369,7 @@ func newManagementAPI(
 	stack awscdk.Stack,
 	cluster awsecs.Cluster,
 	service awsecs.FargateService,
-	hostedZone awsroute53.PublicHostedZone,
+	hostedZone awsroute53.IPublicHostedZone,
 	imageAssetDirectory string,
 ) managementAPIResources {
 	logGroup := awslogs.NewLogGroup(stack, jsii.String("ManagementAPILogGroup"), &awslogs.LogGroupProps{
@@ -626,7 +629,7 @@ func newManagementWeb(
 func newDNSUpdater(
 	stack awscdk.Stack,
 	cluster awsecs.Cluster,
-	hostedZone awsroute53.PublicHostedZone,
+	hostedZone awsroute53.IPublicHostedZone,
 	imageAssetDirectory string,
 ) awslambda.DockerImageFunction {
 	logGroup := awslogs.NewLogGroup(stack, jsii.String("DNSUpdaterLogGroup"), &awslogs.LogGroupProps{
@@ -735,19 +738,6 @@ func newOutputs(stack awscdk.Stack, resources stackOutputResources) {
 			id:          "LogGroupName",
 			value:       resources.logGroup.LogGroupName(),
 			description: "CloudWatch log group name",
-		},
-		{
-			id:          "HostedZoneID",
-			value:       resources.hostedZone.HostedZoneId(),
-			description: "Route 53 public hosted zone ID",
-		},
-		{
-			id: "NameServers",
-			value: awscdk.Fn_Join(
-				jsii.String(","),
-				resources.hostedZone.HostedZoneNameServers(),
-			),
-			description: "Name servers to configure once at the registrar",
 		},
 		{
 			id:          "TeamSpeakAddress",

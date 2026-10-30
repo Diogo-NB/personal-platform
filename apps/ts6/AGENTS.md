@@ -26,8 +26,9 @@ runbook. The CDK implementation is in `../../infra/aws/teamspeak6`.
   Internet Gateway, and no NAT Gateway.
 - Give each running task a dynamic public IPv4 and publish it as
   `ts.diogo-nb.com.br`. Do not add an Elastic IP or load balancer.
-- Host `diogo-nb.com.br` in a retained Route 53 public hosted zone. Keep the
-  `A` record synchronized through the scoped ECS/EventBridge/Lambda updater;
+- Reference the retained `diogo-nb.com.br` Route 53 public hosted zone owned by
+  `PersonalPlatformDnsStack` through the `hostedZoneId` context value; never
+  create a hosted zone in this stack. Keep the `ts` `A` record synchronized through the scoped ECS/EventBridge/Lambda updater;
   do not manage the record manually.
 - Admit only public `9987/UDP` and `30033/TCP`. Do not expose SSH, ECS Exec, or
   TeamSpeak query ports.
@@ -104,6 +105,7 @@ go test ./...
 go vet ./...
 go build ./...
 cdk synth PersonalPlatformStorageStack --no-lookups
+cdk synth PersonalPlatformDnsStack --no-lookups
 cdk synth PersonalPlatformTeamspeak6Stack --no-lookups
 ```
 

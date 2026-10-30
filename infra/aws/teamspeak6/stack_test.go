@@ -166,13 +166,7 @@ func TestNewStackTemplate(t *testing.T) {
 	})
 
 	t.Run("automatic dns for the current singleton task", func(t *testing.T) {
-		template.HasResource(jsii.String("AWS::Route53::HostedZone"), map[string]any{
-			"DeletionPolicy":      "Retain",
-			"UpdateReplacePolicy": "Retain",
-			"Properties": map[string]any{
-				"Name": domainName + ".",
-			},
-		})
+		template.ResourceCountIs(jsii.String("AWS::Route53::HostedZone"), jsii.Number(0))
 		template.HasResourceProperties(jsii.String("AWS::Lambda::Function"), map[string]any{
 			"Architectures": []any{"x86_64"},
 			"Code": map[string]any{
@@ -185,7 +179,7 @@ func TestNewStackTemplate(t *testing.T) {
 					"CLUSTER_ARN":    assertions.Match_AnyValue(),
 					"DNS_NAME":       dnsRecordName,
 					"DNS_TTL":        "60",
-					"HOSTED_ZONE_ID": assertions.Match_AnyValue(),
+					"HOSTED_ZONE_ID": testHostedZoneID,
 					"SERVICE_NAME":   "teamspeak6",
 				},
 			},
@@ -565,8 +559,6 @@ func TestNewStackTemplate(t *testing.T) {
 			"AccessPointID",
 			"SecurityGroupID",
 			"LogGroupName",
-			"HostedZoneID",
-			"NameServers",
 			"TeamSpeakAddress",
 			"ManagementAPIURL",
 			"ManagementAPIKeyID",
@@ -642,6 +634,7 @@ func TestNewStackRequiresImageAssetDirectories(t *testing.T) {
 				DNSUpdaterImageAssetDirectory:    "/tmp/dns-updater",
 				ManagementAPIImageAssetDirectory: "/tmp/management-api",
 				ManagementWebDirectory:           "/tmp/management-web",
+				HostedZoneID:                     testHostedZoneID,
 			},
 			panicMatch: "image asset directory is required",
 		},
@@ -651,6 +644,7 @@ func TestNewStackRequiresImageAssetDirectories(t *testing.T) {
 				ImageAssetDirectory:              "/tmp/teamspeak6",
 				ManagementAPIImageAssetDirectory: "/tmp/management-api",
 				ManagementWebDirectory:           "/tmp/management-web",
+				HostedZoneID:                     testHostedZoneID,
 			},
 			panicMatch: "dns updater image asset directory is required",
 		},
@@ -660,6 +654,7 @@ func TestNewStackRequiresImageAssetDirectories(t *testing.T) {
 				ImageAssetDirectory:           "/tmp/teamspeak6",
 				DNSUpdaterImageAssetDirectory: "/tmp/dns-updater",
 				ManagementWebDirectory:        "/tmp/management-web",
+				HostedZoneID:                  testHostedZoneID,
 			},
 			panicMatch: "management api image asset directory is required",
 		},
@@ -669,8 +664,19 @@ func TestNewStackRequiresImageAssetDirectories(t *testing.T) {
 				ImageAssetDirectory:              "/tmp/teamspeak6",
 				DNSUpdaterImageAssetDirectory:    "/tmp/dns-updater",
 				ManagementAPIImageAssetDirectory: "/tmp/management-api",
+				HostedZoneID:                     testHostedZoneID,
 			},
 			panicMatch: "management web directory is required",
+		},
+		{
+			name: "missing hosted zone id",
+			props: &StackProps{
+				ImageAssetDirectory:              "/tmp/teamspeak6",
+				DNSUpdaterImageAssetDirectory:    "/tmp/dns-updater",
+				ManagementAPIImageAssetDirectory: "/tmp/management-api",
+				ManagementWebDirectory:           "/tmp/management-web",
+			},
+			panicMatch: "hosted zone id is required",
 		},
 	}
 
@@ -724,7 +730,6 @@ func assertCostAllocationTags(
 		"AWS::Lambda::EventSourceMapping":      "Tags",
 		"AWS::Lambda::Function":                "Tags",
 		"AWS::Logs::LogGroup":                  "Tags",
-		"AWS::Route53::HostedZone":             "HostedZoneTags",
 		"AWS::S3::Bucket":                      "Tags",
 		"AWS::SQS::Queue":                      "Tags",
 	}
@@ -823,6 +828,8 @@ type apiRoute struct {
 	apiKeyRequired bool
 }
 
+const testHostedZoneID = "Z0000000000000000TEST"
+
 func newTemplate(t *testing.T) assertions.Template {
 	t.Helper()
 
@@ -838,6 +845,7 @@ func newTemplate(t *testing.T) assertions.Template {
 		DNSUpdaterImageAssetDirectory:    dnsUpdaterImageAssetDirectory(t),
 		ManagementAPIImageAssetDirectory: managementAPIImageAssetDirectory(t),
 		ManagementWebDirectory:           managementWebDirectory(t),
+		HostedZoneID:                     testHostedZoneID,
 	})
 
 	return assertions.Template_FromStack(stack, nil)
