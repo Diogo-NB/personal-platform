@@ -104,9 +104,9 @@ Requirements read from the InvestFlow repository (`docker-compose.yml`,
 - **Network:** `investflow-migrate`, `investflow-api` and `investflow-web`
   join `dokploy-network`, the first two to reach PostgreSQL and the web
   container for Traefik.
-- **Deployment:** planned in InvestFlow's
-  `docs/implementation/planned/production-deployment.md`: the compose file,
-  the release workflow, the production Keycloak URL and the AWS stack.
+- **Deployment:** live since `v0.1.0` (2026-10-31), released by version
+  tags. How it works is in InvestFlow's `docs/architecture/deployment.md`;
+  the procedures are in its `infra/dokploy/README.md`.
 
 #### Production realm
 
