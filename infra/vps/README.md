@@ -58,9 +58,10 @@ postgresql://<name>:<password>@<internal host>:5432/<name>
 ```
 
 `max_connections` is the default 100 and is shared by every project. Keycloak
-caps its pool at 20. Give each application an explicit pool size (Prisma:
-`connection_limit` in the URL, e.g. `?connection_limit=10`) and keep the sum
-well below 100.
+caps its pool at 20. Give each application an explicit pool size and keep the sum well below
+100. Where to set it depends on the client: Prisma's built-in driver reads
+`connection_limit` from the URL, but Prisma 7 with the `pg` driver adapter
+ignores it, and the pool takes `max` in code (InvestFlow: 10).
 
 Backups are not configured yet. Dokploy's database backups (scheduled
 `pg_dump` to an S3 destination) are the planned approach; see the backlog in
@@ -106,4 +107,4 @@ InvestFlow's in [`docs/vps-platform.md`](../../docs/vps-platform.md#production-r
   (`test@localhost.com` in `/etc/dokploy/traefik/traefik.yml`). Set a real
   address in Dokploy before the first certificate is requested.
 - The Dokploy panel is public at `dokploy.diogo-nb.com.br` so CI can call its
-  deploy webhooks. Restricting it to the webhook path is in the backlog.
+  deploy API. Restricting it to that path is in the backlog.
