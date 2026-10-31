@@ -89,8 +89,9 @@ accounts are protected only by their credentials. After the first deploy:
 ### Adding a project realm
 
 Create the realm and its clients in the admin console. The issuer is
-`https://auth.diogo-nb.com.br/realms/<realm>`. For InvestFlow's realm and
-clients, see [`docs/vps-platform.md`](../../docs/vps-platform.md#investflow).
+`https://auth.diogo-nb.com.br/realms/<realm>`. Record each realm's intended
+configuration in the docs, since it lives only in Keycloak's database; see
+InvestFlow's in [`docs/vps-platform.md`](../../docs/vps-platform.md#production-realm).
 
 ## Memory
 

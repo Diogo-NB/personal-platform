@@ -90,20 +90,59 @@ Requirements read from the InvestFlow repository (`docker-compose.yml`,
   extensions. The API reads `DATABASE_URL` (Prisma 7 with the `pg` adapter).
   InvestFlow runs `prisma migrate deploy` itself, as a one-shot `migrate`
   service that `api` waits for.
-- **Keycloak:** realm `investflow` with a confidential client
-  `investflow-api` (the API reads `KEYCLOAK_URL`, `KEYCLOAK_REALM`,
-  `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET`) and a public client
-  `investflow-web` with redirect URIs and web origins on
-  `https://investflow.diogo-nb.com.br`. No application roles; the clients do
-  not request the roles scope. The realm export in InvestFlow's
+- **Keycloak:** realm `investflow`, configured by hand as described below.
+  The API validates tokens against the realm's public keys and requires
+  `aud` to contain `investflow-api`; it never authenticates to Keycloak, so
+  it needs no client secret. The realm export in InvestFlow's
   `infra/keycloak/realms/` is for local development only: it seeds the public
   account `investflow-dev` and must never be imported in production.
 - **Network:** `api` and `migrate` join `dokploy-network` to reach
   PostgreSQL.
-- **Still to do in the InvestFlow repository:** `deploy/compose.yaml`, GitHub
-  Actions workflows that build and push images and call the deploy webhook,
-  and infrastructure as code for its production EventBridge, SQS and IAM
-  user. Locally these only exist through Floci.
+- **Still to do in the InvestFlow repository:**
+  - `deploy/compose.yaml`, and GitHub Actions workflows that build and push
+    images and call the deploy webhook.
+  - Infrastructure as code for its production EventBridge, SQS and IAM user.
+    Locally these only exist through Floci.
+  - `apps/web/src/environments/environment.production.ts` still points
+    Keycloak at the placeholder `https://login.example.com`; set it to
+    `https://auth.diogo-nb.com.br`.
+  - Drop `KEYCLOAK_CLIENT_SECRET`, which no code reads.
+
+#### Production realm
+
+The realm is maintained in the admin console. This is its intended
+configuration; keep it in sync when changing the realm.
+
+| Area | Setting |
+|---|---|
+| General | Require SSL: all requests |
+| Login | User registration off, forgot password off and verify email off (no mail server yet), remember me off, login with email on |
+| Password policy | Minimum length 12, maximum length 64, not username, not email |
+| OTP | Not required; users may configure it for their own account |
+| Sessions and tokens | Defaults: SSO session idle 30 minutes, max 10 hours, access token 5 minutes, no refresh token rotation |
+| Brute force detection | Lockout temporarily after 5 failures |
+| Events | User and admin events saved for 30 days, admin events without representations |
+
+Clients:
+
+- **`investflow-api`:** confidential, every flow disabled, no redirect URIs.
+  It only exists as the access tokens' audience, so no token can be obtained
+  as this client.
+- **`investflow-web`:** public, standard flow only, PKCE `S256` required.
+  Root URL `https://investflow.diogo-nb.com.br`, home URL with a trailing
+  `/`. Valid redirect URIs `https://investflow.diogo-nb.com.br/*` (the app
+  returns users to the page they were on), post-logout redirect URI and web
+  origin exactly `https://investflow.diogo-nb.com.br`. Its dedicated scope
+  holds an **Audience** mapper (`investflow-api-audience`, included client
+  audience `investflow-api`, access token and introspection only). Client
+  scopes kept: `basic`, `profile`, `email`, `web-origins`, `acr`; removed:
+  `offline_access`, `roles`, `address`, `phone`, `organization`,
+  `microprofile-jwt`.
+
+A correct access token for a user (Clients → `investflow-web` → Client
+scopes → Evaluate) has `aud` `investflow-api`, `iss`
+`https://auth.diogo-nb.com.br/realms/investflow`, `azp` `investflow-web`, and
+no `realm_access` or `resource_access`.
 
 ## Open tasks
 
@@ -112,12 +151,16 @@ Server setup:
 - Confirm the Dokploy install: `docker service ls` shows `dokploy` and
   `dokploy-postgres` at 1/1, `docker ps` shows `dokploy-traefik` on 80 and
   443, and `docker network inspect dokploy-network` shows a `10.20.` subnet.
-- Turn on 2FA for the Dokploy owner account and store the recovery codes.
 - Tighten `/etc/dokploy`, which the installer created with mode `777`.
 - Take a Hostinger snapshot once the base setup is confirmed.
 - Ask Hostinger support which CPU-credit figures apply to KVM 2 (their page
   contradicts itself) and how a mid-term upgrade credits the prepaid term.
 - Install Beszel to watch memory, CPU and steal time per container.
+
+AWS:
+
+- CDK and the AWS CLI currently use the root account's access keys. Create an
+  IAM user or IAM Identity Center profile for them and delete the root keys.
 
 Platform:
 
