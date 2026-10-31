@@ -6,7 +6,7 @@ settings.
 
 | Service | Dokploy service type | Public address |
 |---|---|---|
-| PostgreSQL 17 | Dokploy Database (PostgreSQL), app name `platform-postgres` | None |
+| PostgreSQL 17 | Dokploy Database (PostgreSQL) | None |
 | Keycloak 26 | Compose, `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` |
 
 DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
@@ -14,21 +14,25 @@ DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
 ## Network
 
 Shared services and projects meet on Dokploy's `dokploy-network`, the network
-Traefik routes through. PostgreSQL is reachable on it as `platform-postgres`;
+Traefik routes through. PostgreSQL is reachable on it by its internal host;
 project containers that need it join `dokploy-network` as an external network
 (most already do, because their domain requires it). Projects reach Keycloak
 through its public hostname, because tokens carry it as `iss`.
 
 Every container on the network resolves every other container's service name,
-so services use unique names (`platform-postgres`, `platform-keycloak`). Never
+so services use unique names (`platform-keycloak`). Never
 give a service a generic name such as `postgres` or `api`. Projects are
 isolated from each other by Postgres roles, not by the network.
 
 ## PostgreSQL
 
-A Dokploy Database service: image `postgres:17-alpine`, app name
-`platform-postgres`, database user `postgres` (the superuser), no external
-port, memory limit 1 GiB. Its configuration lives in Dokploy, not in Git.
+A Dokploy Database service: image `postgres:17-alpine`, database user
+`postgres` (the superuser), no external port, memory limit 1 GiB. Its
+configuration lives in Dokploy, not in Git. Dokploy generates its internal
+host (currently `platform-postgres-ufprvz`) and it cannot be renamed, so
+clients take it from their Dokploy environment (`POSTGRES_HOST`, or the host
+in `DATABASE_URL`) rather than from Git. If the service is ever recreated,
+update those values.
 
 Each project gets one login role and one database it owns, both named after
 the project. Create them with the superuser and
@@ -50,7 +54,7 @@ Projects then run their own migrations with their own role.
 Connection string for a project container on `dokploy-network`:
 
 ```
-postgresql://<name>:<password>@platform-postgres:5432/<name>
+postgresql://<name>:<password>@<internal host>:5432/<name>
 ```
 
 `max_connections` is the default 100 and is shared by every project. Keycloak
@@ -67,8 +71,8 @@ Backups are not configured yet. Dokploy's database backups (scheduled
 One instance, one realm per project. Realms, clients and users are created by
 hand in the admin console; there are no realm files in production.
 
-Secrets in Dokploy: `KC_DB_PASSWORD` (the `keycloak` role) and
-`KC_BOOTSTRAP_ADMIN_PASSWORD`. Keycloak creates the temporary bootstrap admin
+Environment in Dokploy: `POSTGRES_HOST` (the database's internal host),
+`KC_DB_PASSWORD` (the `keycloak` role) and `KC_BOOTSTRAP_ADMIN_PASSWORD`. Keycloak creates the temporary bootstrap admin
 only while the master realm has no admin.
 
 The public route is set in Dokploy's Domains tab for the service: host
