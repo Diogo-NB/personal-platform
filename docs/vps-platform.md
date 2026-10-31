@@ -97,6 +97,10 @@ Requirements read from the InvestFlow repository (`docker-compose.yml`,
   it needs no client secret. The realm export in InvestFlow's
   `infra/local-kc/realms/` is for local development only: it seeds the public
   account `investflow-dev` and must never be imported in production.
+- **AWS:** its IAM user `investflow-api` works only from the VPS's public
+  IP (`aws:SourceIp` in InvestFlow's `InvestflowMessagingStack`). Moving to
+  another server means updating that stack as well as
+  `vps.diogo-nb.com.br`.
 - **Network:** `investflow-migrate`, `investflow-api` and `investflow-web`
   join `dokploy-network`, the first two to reach PostgreSQL and the web
   container for Traefik.
