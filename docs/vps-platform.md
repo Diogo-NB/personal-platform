@@ -24,6 +24,7 @@ DNS stack is described in [`infra/aws/README.md`](../infra/aws/README.md#dns).
 | Shared network    | Dokploy's `dokploy-network`. PostgreSQL is reachable on it by its internal host; project containers that need it join it. Projects reach Keycloak through its public hostname, since tokens carry it as `iss`. |
 | Websites          | Served from the VPS: an nginx container per site on the same domain as its API, with Traefik routing `/` to the web container and `/api` to the API. S3 + CloudFront only for a site that must stay up when the VPS is down.                                                                                                                    |
 | AWS               | The only cloud provider. Route 53 (zone `diogo-nb.com.br`), S3 for backups, SES for addy.io's outbound mail (Hostinger caps outbound mail at 5 messages per minute), and each project's EventBridge and SQS in `sa-east-1`. One IAM user per project, scoped to its own resources.                                                              |
+| AWS access        | IAM Identity Center, an organization instance in `sa-east-1` (organization `o-b3exw3k2qo`, with this account as its management account). One user, `diogo-nb`, MFA on every sign-in, permission set `AdministratorAccess` on the account, with 12-hour sessions. The CLI and CDK sign in through it. The root user has no access keys and is kept for console break-glass, with MFA. All projects share this one account; a member account per project was considered and declined on 2026-10-31, since each project's IAM user is already scoped to its own resources. |
 | DNS               | Route 53 stays authoritative, managed by CDK in `PersonalPlatformDnsStack`, which owns the zone. `vps.diogo-nb.com.br` is the only record holding the server address; every service name is an alias record to it, so changing servers changes one value.                                                                                       |
 | TLS               | Traefik obtains and renews Let's Encrypt certificates through the HTTP challenge on port 80. A hostname must resolve to the VPS before its service is deployed.                                                                                                                                                                                 |
 | Memory            | Every container has a memory limit. Node apps set `--max-old-space-size` below it; Keycloak sets `JAVA_OPTS_KC_HEAP`.                                                                                                                                                                                                                           |
@@ -151,11 +152,6 @@ Server setup:
 - Ask Hostinger support which CPU-credit figures apply to KVM 2 (their page
   contradicts itself) and how a mid-term upgrade credits the prepaid term.
 - Install Beszel to watch memory, CPU and steal time per container.
-
-AWS:
-
-- CDK and the AWS CLI currently use the root account's access keys. Create an
-  IAM user or IAM Identity Center profile for them and delete the root keys.
 
 Platform:
 
