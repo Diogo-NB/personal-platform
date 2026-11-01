@@ -1,1 +1,7 @@
 /bin/
+
+# Retired application directories may still contain local secrets and build output.
+/apps/dns-updater/
+/apps/ts6/
+/apps/ts6-management-api/
+/apps/ts6-management-web/

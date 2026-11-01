@@ -31,8 +31,8 @@ DNS stack is described in [`infra/aws/README.md`](../infra/aws/README.md#dns).
 
 Domains in use: `auth.diogo-nb.com.br` (Keycloak), `dokploy.diogo-nb.com.br`
 (Dokploy panel), `investflow.diogo-nb.com.br` (InvestFlow).
-`teamspeak.diogo-nb.com.br` is prepared for the VPS TeamSpeak server; its DNS
-record requires deployment of `PersonalPlatformDnsStack`.
+`teamspeak.diogo-nb.com.br` serves the permanent VPS TeamSpeak server; its DNS
+alias has been deployed through `PersonalPlatformDnsStack`.
 
 ## Memory budget
 
@@ -46,7 +46,7 @@ otherwise.
 | Keycloak (heap ≤ 384 MiB)            | 768 MiB | ~490 MiB after startup                |
 | NestJS API (heap 256 MB)             | 384 MB  | ~170 MB idle                          |
 | Web (nginx)                          | 32 MB   | ~10 MB                                |
-| TeamSpeak 6                          | 256 MiB | ~150 MB; VPS deployment not yet verified |
+| TeamSpeak 6                          | 256 MiB | ~150 MB; VPS operation confirmed |
 | addy.io + MariaDB + Redis, Rspamd on | 512 MB  | ~410 MB                               |
 | **Core total**                       |         | **~3.7 GB, about half the host free** |
 
@@ -164,13 +164,13 @@ Server setup:
 
 Platform:
 
-- Deploy the permanent VPS TeamSpeak server from
-  [`infra/vps/teamspeak/README.md`](../infra/vps/teamspeak/README.md), then
-  configure daily S3 volume backups and test recovery. It uses a pinned official
-  image, SQLite, and local files, with manual image updates through Git and
-  Dokploy. There is no data to migrate. The existing ECS Fargate server,
-  management applications, DNS updater, and `ts.diogo-nb.com.br` stay independent;
-  removing `PersonalPlatformTeamspeak6Stack` requires a separate decision.
+- The operator confirmed TeamSpeak migration and VPS operation succeeded.
+  [`infra/vps/teamspeak/README.md`](../infra/vps/teamspeak/README.md) owns its
+  configuration and updates. Configure daily S3 volume backups and test recovery.
+- The former AWS TeamSpeak stack and applications have been removed from source,
+  and the operator confirmed CloudFormation stack deletion succeeded. Cleanup
+  of retained EFS storage, old DNS names, and shared assets still requires
+  verification.
 
 ## Backlog
 

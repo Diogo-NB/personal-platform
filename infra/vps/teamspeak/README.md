@@ -1,9 +1,12 @@
 # TeamSpeak 6 on the VPS
 
-Prepared for deployment; live operation and backups are not yet verified.
-This is the intended permanent personal server, starting with an empty database.
-The existing AWS TeamSpeak stack, EFS data, management applications, and
-`ts.diogo-nb.com.br` record remain independent. No migration is needed.
+The VPS server is the permanent TeamSpeak instance. The operator confirmed the
+migration and live operation succeeded. S3 backups and restore testing still
+require verification.
+
+The AWS server and management applications are retired, and the operator
+confirmed the old CloudFormation stack was deleted. Cleanup of retained EFS
+storage and old DNS names still requires verification.
 
 ## Deployment
 
@@ -50,10 +53,11 @@ cdk deploy PersonalPlatformDnsStack
 dig A teamspeak.diogo-nb.com.br +short
 ```
 
-The diff should add the TeamSpeak VPS alias without replacing the hosted zone
-or changing existing records. Do not deploy the AWS TeamSpeak stack for this
-change. Its `ts.diogo-nb.com.br` hostname remains unchanged. While DNS deployment
-is pending, connect directly to `vps.diogo-nb.com.br` on the same voice port.
+The VPS alias has been deployed. Keep it and the shared hosted zone in place.
+Future diffs must preserve existing service records unless a change is intended.
+The old `ts.diogo-nb.com.br` record belongs to the retired AWS service and is
+removed separately. If troubleshooting this alias, connect directly to
+`vps.diogo-nb.com.br` on the same voice port.
 
 ## Storage and resources
 

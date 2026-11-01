@@ -13,9 +13,9 @@ settings.
 DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
 
 Personal applications run in the separate Dokploy project `personal`.
-The [TeamSpeak 6 runbook](teamspeak/README.md) prepares a permanent server
+The [TeamSpeak 6 runbook](teamspeak/README.md) covers the permanent server
 using the official image, SQLite, a local named volume, and manual deployments.
-Its deployment and S3 volume backups are not yet verified live.
+VPS operation is confirmed; S3 volume backups and restore testing remain pending.
 
 ## Network
 

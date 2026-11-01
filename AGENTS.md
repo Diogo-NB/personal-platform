@@ -14,13 +14,11 @@
 - Preserve required machine directives, build tags, license headers, generated
   code markers, and justified linter suppressions.
 
-## Scoped project guidance
+## Infrastructure guidance
 
-- Before reviewing or modifying anything under `apps/ts6/` or
-  `infra/aws/teamspeak6/`, read and follow `apps/ts6/AGENTS.md`.
-- Before reviewing or modifying anything under `apps/ts6-management-api/`, read
-  and follow `apps/ts6-management-api/AGENTS.md`.
-- Before reviewing or modifying anything under `apps/ts6-management-web/`, read
-  and follow `apps/ts6-management-web/AGENTS.md`.
-- Before reviewing or modifying anything under `apps/dns-updater/`, read and
-  follow `apps/dns-updater/AGENTS.md`.
+- TeamSpeak runs only on the VPS. Read `infra/vps/teamspeak/README.md` before
+  changing its configuration or operating it.
+- Agents may run local checks and offline CDK synthesis. Only the user runs
+  commands that contact AWS, including queries, diff, deploy, and deletion.
+- Preserve `PersonalPlatformDnsStack`, the shared hosted zone, VPS records,
+  and the manually managed `skycrate-storage` bucket.
