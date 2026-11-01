@@ -155,7 +155,10 @@ Server setup:
 - Take a Hostinger snapshot once the base setup is confirmed.
 - Ask Hostinger support which CPU-credit figures apply to KVM 2 (their page
   contradicts itself) and how a mid-term upgrade credits the prepaid term.
-- Install Beszel to watch memory, CPU and steal time per container.
+- Deploy and verify Beszel for host and container monitoring using
+  [`infra/vps/beszel/README.md`](../infra/vps/beszel/README.md). One Compose file
+  is prepared for an SSH-only dashboard and local agent; deployment is not
+  yet verified. Check available metrics before relying on a steal-time chart.
 
 Platform:
 

@@ -8,6 +8,7 @@ settings.
 |---|---|---|
 | PostgreSQL 17 | Dokploy Database (PostgreSQL) | None |
 | Keycloak 26 | Compose, `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` |
+| Beszel (prepared; not yet verified live) | Compose, [`beszel/README.md`](beszel/README.md) | SSH tunnel only |
 
 DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
 
@@ -94,12 +95,22 @@ Create the realm and its clients in the admin console. The issuer is
 configuration in the docs, since it lives only in Keycloak's database; see
 InvestFlow's in [`docs/vps-platform.md`](../../docs/vps-platform.md#production-realm).
 
+## Beszel monitoring
+
+The [Beszel runbook](beszel/README.md) covers deploying the hub first, registering
+the VPS, enabling the agent in the same Compose service, and verifying host and
+container metrics. Its dashboard binds only to `127.0.0.1:8090`; access uses
+the existing `vps` SSH alias.
+The agent and hub share a Unix socket, without a public monitoring port.
+
 ## Memory
 
 | Container | Limit | Notes |
 |---|---|---|
 | `platform-postgres` | 1 GiB | ~70 MiB idle locally |
 | `platform-keycloak` | 768 MiB | heap capped at 384 MiB; ~490 MiB after startup locally |
+| `platform-beszel` | 256 MiB | initial budget; consumption not measured |
+| `platform-beszel-agent` | 64 MiB | initial budget; consumption not measured |
 
 ## Dokploy notes
 

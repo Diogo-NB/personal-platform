@@ -1,0 +1,52 @@
+services:
+  platform-beszel:
+    image: henrygd/beszel:0.21.1
+    restart: unless-stopped
+    environment:
+      APP_URL: http://localhost:8090
+    ports:
+      - '127.0.0.1:8090:8090'
+    volumes:
+      - hub-data:/beszel_data
+      - agent-socket:/beszel_socket
+    healthcheck:
+      test: ['CMD', '/beszel', 'health', '--url', 'http://localhost:8090']
+      interval: 120s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  platform-beszel-agent:
+    image: henrygd/beszel-agent:0.21.1
+    profiles: ['agent']
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      LISTEN: /beszel_socket/beszel.sock
+      HUB_URL: http://127.0.0.1:8090
+      # Compose interpolates even disabled profiles before the hub can start.
+      KEY: ${BESZEL_AGENT_KEY:-}
+      TOKEN: ${BESZEL_AGENT_TOKEN:-}
+    volumes:
+      - agent-data:/var/lib/beszel-agent
+      - agent-socket:/beszel_socket
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ['CMD', '/agent', 'health']
+      interval: 120s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+volumes:
+  hub-data:
+  agent-data:
+  agent-socket:
