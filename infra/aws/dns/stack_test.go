@@ -59,7 +59,46 @@ func TestNewStack(t *testing.T) {
 				},
 			})
 		}
-		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(5))
+	})
+
+	t.Run("hosted email records", func(t *testing.T) {
+		for _, record := range []struct {
+			name       string
+			recordType string
+			values     []any
+		}{
+			{
+				name: "diogo-nb.com.br.", recordType: "MX",
+				values: []any{"10 mail.anonaddy.me", "20 mail2.anonaddy.me"},
+			},
+			{
+				name: "diogo-nb.com.br.", recordType: "TXT",
+				values: []any{
+					`"v=spf1 include:spf.anonaddy.me -all"`,
+					`"aa-verify=183b894cd3b8313ce5c8d0e8ee9ffe3f9e887b41"`,
+				},
+			},
+			{
+				name: "dk1._domainkey.diogo-nb.com.br.", recordType: "CNAME",
+				values: []any{"dk1._domainkey.anonaddy.me"},
+			},
+			{
+				name: "dk2._domainkey.diogo-nb.com.br.", recordType: "CNAME",
+				values: []any{"dk2._domainkey.anonaddy.me"},
+			},
+			{
+				name: "_dmarc.diogo-nb.com.br.", recordType: "TXT",
+				values: []any{`"v=DMARC1; p=quarantine; adkim=s"`},
+			},
+		} {
+			template.HasResourceProperties(jsii.String("AWS::Route53::RecordSet"), map[string]any{
+				"Name":            record.name,
+				"Type":            record.recordType,
+				"ResourceRecords": record.values,
+				"TTL":             "300",
+			})
+		}
+		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(10))
 	})
 
 	t.Run("outputs", func(t *testing.T) {

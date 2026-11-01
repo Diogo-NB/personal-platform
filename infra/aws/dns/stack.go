@@ -1,5 +1,5 @@
 // Package dns provisions the personal domain's Route 53 hosted zone and the
-// records that point service names at the VPS.
+// records for VPS services and hosted email.
 package dns
 
 import (
@@ -71,6 +71,8 @@ func NewStack(scope constructs.Construct, id string, props *StackProps) awscdk.S
 			Zone: hostedZone,
 		})
 	}
+
+	addAddyRecords(stack, hostedZone)
 
 	awscdk.NewCfnOutput(stack, jsii.String("HostedZoneID"), &awscdk.CfnOutputProps{
 		Value:       hostedZone.HostedZoneId(),
