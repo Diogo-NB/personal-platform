@@ -100,6 +100,8 @@ func NewBackupStack(
 		},
 	)
 
+	bucket.Policy().ApplyRemovalPolicy(awscdk.RemovalPolicy_RETAIN)
+
 	// Export the fixed bucket name for tooling and stack consumers.
 	awscdk.NewCfnOutput(
 		stack,

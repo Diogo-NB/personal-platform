@@ -28,3 +28,18 @@ func TestNewBackupStackTagsBucket(t *testing.T) {
 		},
 	})
 }
+
+func TestNewBackupStackRetainsBucketAndPolicy(t *testing.T) {
+	app := awscdk.NewApp(nil)
+	stack := NewBackupStack(app, "TestStack", nil)
+
+	template := assertions.Template_FromStack(stack, nil)
+	for _, resourceType := range []string{"AWS::S3::Bucket", "AWS::S3::BucketPolicy"} {
+		t.Run(resourceType, func(t *testing.T) {
+			template.HasResource(jsii.String(resourceType), map[string]any{
+				"DeletionPolicy":      "Retain",
+				"UpdateReplacePolicy": "Retain",
+			})
+		})
+	}
+}
