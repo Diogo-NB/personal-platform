@@ -45,7 +45,7 @@ func TestNewStack(t *testing.T) {
 	})
 
 	t.Run("service names alias the vps record", func(t *testing.T) {
-		for _, name := range []string{"auth", "dokploy", "investflow"} {
+		for _, name := range []string{"auth", "dokploy", "investflow", "teamspeak"} {
 			template.HasResourceProperties(jsii.String("AWS::Route53::RecordSet"), map[string]any{
 				"Name": name + ".diogo-nb.com.br.",
 				"Type": "A",
@@ -59,7 +59,7 @@ func TestNewStack(t *testing.T) {
 				},
 			})
 		}
-		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(4))
+		template.ResourceCountIs(jsii.String("AWS::Route53::RecordSet"), jsii.Number(5))
 	})
 
 	t.Run("outputs", func(t *testing.T) {

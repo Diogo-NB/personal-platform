@@ -25,6 +25,7 @@ var vpsServiceNames = []string{
 	"auth",
 	"dokploy",
 	"investflow",
+	"teamspeak",
 }
 
 type StackProps struct {

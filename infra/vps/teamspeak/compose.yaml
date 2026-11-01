@@ -1,0 +1,40 @@
+services:
+  personal-teamspeak6:
+    image: teamspeaksystems/teamspeak6-server:6.0.0-beta13.1
+    platform: linux/amd64
+    restart: unless-stopped
+    stop_grace_period: 120s
+    working_dir: /var/tsserver
+    environment:
+      TSSERVER_LICENSE_ACCEPTED: accept
+      TSSERVER_DATABASE_PLUGIN: sqlite3
+      TSSERVER_DATABASE_NAME: teamspeak
+      TSSERVER_DEFAULT_PORT: '9987'
+      TSSERVER_VOICE_IP: 0.0.0.0
+      TSSERVER_FILE_TRANSFER_PORT: '30033'
+      TSSERVER_FILE_TRANSFER_IP: 0.0.0.0
+      TSSERVER_LICENSE_PATH: /var/tsserver
+      TSSERVER_LOG_PATH: /var/tsserver/logs
+      TSSERVER_CRASHDUMP_PATH: /var/tsserver/crashdumps
+      TSSERVER_QUERY_SSH_ENABLED: '0'
+      TSSERVER_QUERY_HTTP_ENABLED: '0'
+      TSSERVER_QUERY_HTTPS_ENABLED: '0'
+      TSSERVER_METRICS_ENABLED: '0'
+      TSSERVER_S3FT_ENABLED: '0'
+    ports:
+      - '9987:9987/udp'
+      - '30033:30033/tcp'
+    volumes:
+      - teamspeak6-data:/var/tsserver
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  teamspeak6-data:

@@ -40,7 +40,7 @@ data-recovery limits.
 
 `PersonalPlatformDnsStack` owns the retained Route 53 public hosted zone for
 `diogo-nb.com.br`, delegated from Registro.br. `vps.diogo-nb.com.br` is the
-only record holding the VPS address; `auth`, `dokploy` and `investflow` are
+only record holding the VPS address; `auth`, `dokploy`, `investflow`, and `teamspeak` are
 alias records to it, so moving to another server changes one value in
 `dns/stack.go`. Add a name to `vpsServiceNames` for each new service on the
 VPS.
