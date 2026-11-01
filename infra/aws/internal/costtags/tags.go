@@ -12,8 +12,6 @@ import (
 const (
 	// ApplicationDNS identifies the shared personal domain DNS resources.
 	ApplicationDNS = "dns"
-	// ApplicationSkycrate identifies resources used by the Skycrate application.
-	ApplicationSkycrate = "skycrate"
 	// ApplicationTeamSpeak6 identifies resources used by the TeamSpeak 6 application.
 	ApplicationTeamSpeak6 = "teamspeak6"
 	// ComponentServer identifies the TeamSpeak server and its supporting resources.

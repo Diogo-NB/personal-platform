@@ -1,11 +1,9 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 
 	"aws/dns"
-	"aws/storage"
 	"aws/teamspeak6"
 
 	"github.com/aws/aws-cdk-go/awscdk/v2"
@@ -16,19 +14,6 @@ func main() {
 	defer jsii.Close()
 
 	app := awscdk.NewApp(nil)
-
-	storage.NewBackupStack(
-		app,
-		"PersonalPlatformStorageStack",
-		&storage.BackupStackProps{
-			StackProps: awscdk.StackProps{
-				Env: &awscdk.Environment{
-					Account: jsii.String(os.Getenv("CDK_DEFAULT_ACCOUNT")),
-					Region:  jsii.String("us-east-1"),
-				},
-			},
-		},
-	)
 
 	dns.NewStack(
 		app,

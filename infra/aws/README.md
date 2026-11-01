@@ -8,13 +8,13 @@ different AWS Regions.
 
 | Stack | Region | Status | Documentation |
 |---|---|---|---|
-| `PersonalPlatformStorageStack` | `us-east-1` | Implemented | This document |
 | `PersonalPlatformDnsStack` | `sa-east-1` | Implemented | [DNS](#dns) |
 | `PersonalPlatformTeamspeak6Stack` | `sa-east-1` | Implemented | [TeamSpeak 6](../../apps/ts6/README.md) |
 
-The existing storage stack provisions the `skycrate-storage` S3 bucket in
-`us-east-1`. Do not change its Region when adding regional stacks to this CDK
-application.
+The `skycrate-storage` S3 bucket in `us-east-1` is managed manually, outside
+this CDK application. Its former CloudFormation stack was deleted with both
+the bucket and its HTTPS-enforcement policy retained. Do not recreate a CDK
+stack for this bucket.
 
 The TeamSpeak stack provisions a single public on-demand ECS Fargate task in
 `sa-east-1`, backed by an encrypted retained EFS One Zone file system. Its
@@ -74,10 +74,10 @@ policy. It moves without touching any record:
 Both stacks apply the same tag hierarchy to the CloudFormation stack and every
 taggable resource:
 
-| Tag | Storage value | TeamSpeak value | Purpose |
+| Tag | DNS value | TeamSpeak value | Purpose |
 |---|---|---|---|
 | `Project` | `personal-platform` | `personal-platform` | Aggregate the complete project cost. |
-| `Application` | `skycrate` | `teamspeak6` | Split costs by application. |
+| `Application` | `dns` | `teamspeak6` | Split costs by application. |
 | `Component` | Not set | `server`, `management-api`, or `management-web` | Split TeamSpeak costs by deployable component. |
 | `Environment` | `production` | `production` | Separate long-lived and future non-production resources. |
 
@@ -93,10 +93,12 @@ ECR repository is shared infrastructure rather than a resource created by
 either application stack, and a task's dynamic public IPv4 is not a separately
 tagged resource. Review those charges separately when reconciling totals.
 
-The bucket uses S3-managed encryption, versioning, blocked public access,
-bucket-owner-enforced ownership, and a bucket policy that rejects requests made
-without TLS. CloudFormation retains the bucket if the stack is deleted or
-replaced.
+## Manually managed Skycrate storage
+
+At detachment, the bucket used S3-managed encryption, versioning, blocked public
+access, bucket-owner-enforced ownership, and a bucket policy that rejects
+requests made without TLS. Manage its configuration, lifecycle rules, policy,
+and tags directly in S3. CDK deployments do not manage this bucket or its policy.
 
 Objects tagged `storage-tier=cold` transition from S3 Glacier Flexible
 Retrieval to S3 Glacier Deep Archive after 365 days. Noncurrent versions expire
@@ -127,7 +129,6 @@ cd ../../../infra/aws
 go test ./...
 go vet ./...
 go build ./...
-cdk synth PersonalPlatformStorageStack --no-lookups
 cdk synth PersonalPlatformDnsStack --no-lookups
 cdk synth PersonalPlatformTeamspeak6Stack --no-lookups
 ```

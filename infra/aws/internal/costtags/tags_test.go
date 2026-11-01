@@ -8,9 +8,9 @@ func TestMerge(t *testing.T) {
 		"Project": stringPointer("incorrect"),
 	}
 
-	tags := *Merge(&existing, ApplicationSkycrate)
+	tags := *Merge(&existing, ApplicationDNS)
 	expected := map[string]string{
-		"Application": "skycrate",
+		"Application": "dns",
 		"Custom":      "retained",
 		"Environment": "production",
 		"Project":     "personal-platform",
