@@ -1,0 +1,28 @@
+services:
+  platform-pgadmin:
+    image: dpage/pgadmin4:9.19.0
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:?set in Dokploy}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?set in Dokploy}
+      # Dokploy's pgAdmin template disables server mode, which removes the login
+      # screen and leaves saved database passwords without a master password.
+      PGADMIN_CONFIG_SERVER_MODE: 'True'
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: 'True'
+    ports:
+      - '127.0.0.1:5050:80'
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    networks:
+      - dokploy-network
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+volumes:
+  pgadmin-data:
+
+networks:
+  dokploy-network:
+    external: true

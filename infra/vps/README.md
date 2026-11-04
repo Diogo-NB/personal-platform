@@ -9,6 +9,7 @@ settings.
 | PostgreSQL 17 | Dokploy Database (PostgreSQL) | None |
 | Keycloak 26 | Compose, `infra/vps/keycloak/compose.yaml` | `https://auth.diogo-nb.com.br` |
 | Beszel (prepared; not yet verified live) | Compose, [`beszel/README.md`](beszel/README.md) | SSH tunnel only |
+| pgAdmin | Compose, `infra/vps/pgadmin/compose.yaml` | SSH tunnel only |
 
 DNS records live in [`PersonalPlatformDnsStack`](../aws/README.md#dns).
 
@@ -108,6 +109,40 @@ container metrics. Its dashboard binds only to `127.0.0.1:8090`; access uses
 the existing `vps` SSH alias.
 The agent and hub share a Unix socket, without a public monitoring port.
 
+## pgAdmin
+
+A PostgreSQL admin UI bound only to `127.0.0.1:5050` on the VPS and reached
+through an SSH tunnel. It can reach every database on `dokploy-network`, so never
+give it a public route. pgAdmin manages PostgreSQL only; MySQL and MariaDB would
+need another tool.
+
+1. Create a Compose service named `pgadmin` in `platform` / `production`, with
+   this repository as its Git source and `infra/vps/pgadmin/compose.yaml` as its
+   Compose path. Do not use Dokploy's pgAdmin template, which has no login.
+2. Leave Domains empty and do not enable isolated deployments, which rewrite the
+   loopback port binding.
+3. In its environment settings, set `PGADMIN_DEFAULT_EMAIL` and a strong
+   `PGADMIN_DEFAULT_PASSWORD`. Deploy.
+4. On the VPS, check that `ss -tln | grep 5050` shows `127.0.0.1:5050`, not
+   `0.0.0.0:5050`.
+5. On your workstation, open the tunnel and keep it running while using pgAdmin:
+
+   ```sh
+   ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:5050:127.0.0.1:5050 vps
+   ```
+
+6. Open `http://localhost:5050` and sign in. Set the master password when
+   prompted. It encrypts saved database passwords.
+7. Register the server with the database's internal host and port 5432. Prefer a
+   project role for routine work over the `postgres` superuser.
+
+pgAdmin locks an account after 3 failed logins. `PGADMIN_DEFAULT_EMAIL` and
+`PGADMIN_DEFAULT_PASSWORD` apply only when the data volume is first initialized,
+so changing them later does not change the account.
+
+`PGADMIN_CONFIG_*` values are written once to a generated config file. To apply a
+change to them, recreate the container.
+
 ## Memory
 
 | Container | Limit | Notes |
@@ -116,6 +151,7 @@ The agent and hub share a Unix socket, without a public monitoring port.
 | `platform-keycloak` | 768 MiB | heap capped at 384 MiB; ~490 MiB after startup locally |
 | `platform-beszel` | 256 MiB | initial budget; consumption not measured |
 | `platform-beszel-agent` | 64 MiB | initial budget; consumption not measured |
+| `platform-pgadmin` | 512 MiB | initial budget; consumption not measured |
 
 ## Dokploy notes
 
